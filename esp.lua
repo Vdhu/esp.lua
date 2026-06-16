@@ -1,7 +1,7 @@
 --[[
-    Universal ESP Script (with Rayfield UI) | @hvhmilana
+    Universal ESP Script
     Works in ALL Roblox games
-    Features: Box ESP, Tracers, Name, Health Bar, Distance, Team Check
+    Features: Box ESP, Tracers, Name, Health Bar, Distance, Team Check, Skeleton ESP
     Open Menu: RightShift
 ]]
 
@@ -10,13 +10,13 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 local Window = Rayfield:CreateWindow({
-    Name  = "Universal ESP | @hvhmilana",
+    Name  = "Universal ESP Script",
     Icon  = 4483362458,
-    LoadingTitle    = "Universal ESP",
-    LoadingSubtitle = "by @hvhmilana",
+    LoadingTitle    = "Universal ESP Script",
+    LoadingSubtitle = "Loading...",
     ConfigurationSaving = {
         Enabled    = true,
-        FolderName = "UniversalESPHvhmilana",
+        FolderName = "UniversalESPScript",
         FileName   = "ESPSettings"
     },
     Keybind = Enum.KeyCode.RightShift,
@@ -41,6 +41,7 @@ local Settings = {
     ShowName     = true,
     ShowHealth   = true,
     ShowDistance = true,
+    ShowSkeleton = true,
     MaxDistance  = 1500,
     EnemyColor   = Color3.fromRGB(255, 50,  50),
     TeamColor    = Color3.fromRGB(50,  150, 255),
@@ -78,6 +79,13 @@ ESPTab:CreateToggle({
 })
 
 ESPTab:CreateToggle({
+    Name         = "Skeleton ESP (скелет игрока)",
+    CurrentValue = Settings.ShowSkeleton,
+    Flag         = "SkeletonESP",
+    Callback     = function(v) Settings.ShowSkeleton = v end,
+})
+
+ESPTab:CreateToggle({
     Name         = "Имя игрока",
     CurrentValue = Settings.ShowName,
     Flag         = "NameESP",
@@ -110,8 +118,8 @@ ESPTab:CreateSlider({
 
 -- ========== INFO TAB ==========
 InfoTab:CreateParagraph({
-    Title   = "Universal ESP | @hvhmilana",
-    Content = "Работает во ВСЕХ Roblox играх!\n\nФУНКЦИИ:\n• Box ESP (рамка вокруг игрока)\n• Tracers (линии к игрокам)\n• Имя игрока\n• Полоска здоровья\n• Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
+    Title   = "Universal ESP Script",
+    Content = "Работает во ВСЕХ Roblox играх!\n\nФУНКЦИИ:\n• Box ESP (рамка вокруг игрока)\n• Skeleton ESP (скелет игрока)\n• Tracers (линии к игрокам)\n• Имя игрока\n• Полоска здоровья\n• Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
 })
 
 -- ========== HELPERS ==========
@@ -159,6 +167,29 @@ end
 local function CreateESP(Player)
     if Player == LP then return end
     if ESPCache[Player] then return end
+    
+    -- Skeleton lines
+    local SkeletonLines = {
+        -- Head to Torso
+        HeadTorso = NewLine(2, 0.8),
+        -- Torso
+        TorsoHip = NewLine(2, 0.8),
+        -- Left Arm
+        TorsoLeftShoulder = NewLine(2, 0.8),
+        LeftShoulderElbow = NewLine(2, 0.8),
+        LeftElbowHand = NewLine(2, 0.8),
+        -- Right Arm
+        TorsoRightShoulder = NewLine(2, 0.8),
+        RightShoulderElbow = NewLine(2, 0.8),
+        RightElbowHand = NewLine(2, 0.8),
+        -- Left Leg
+        HipLeftKnee = NewLine(2, 0.8),
+        LeftKneeFoot = NewLine(2, 0.8),
+        -- Right Leg
+        HipRightKnee = NewLine(2, 0.8),
+        RightKneeFoot = NewLine(2, 0.8),
+    }
+    
     ESPCache[Player] = {
         BoxTop   = NewLine(),
         BoxBot   = NewLine(),
@@ -169,6 +200,7 @@ local function CreateESP(Player)
         Distance = NewText(10),
         HpBg     = NewLine(3, 0),
         HpFill   = NewLine(3, 0),
+        Skeleton = SkeletonLines,
     }
     ESPCache[Player].HpBg.Color    = Color3.fromRGB(30, 30, 40)
     ESPCache[Player].Distance.Font = 1
@@ -177,12 +209,91 @@ end
 local function RemoveESP(Player)
     local o = ESPCache[Player]
     if not o then return end
-    for _, d in pairs(o) do d:Remove() end
+    for _, d in pairs(o) do 
+        if type(d) == "table" then
+            for _, line in pairs(d) do
+                line:Remove()
+            end
+        else
+            d:Remove() 
+        end
+    end
     ESPCache[Player] = nil
 end
 
 local function HideESP(o)
-    for _, d in pairs(o) do d.Visible = false end
+    for _, d in pairs(o) do 
+        if type(d) == "table" then
+            for _, line in pairs(d) do
+                line.Visible = false
+            end
+        else
+            d.Visible = false
+        end
+    end
+end
+
+-- ========== SKELETON HELPER ==========
+local function DrawSkeleton(Player, o, Col)
+    local Char = Player.Character
+    if not Char then return end
+    
+    local function GetLimbPos(partName)
+        local part = Char:FindFirstChild(partName)
+        if part then
+            local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                return Vector2.new(pos.X, pos.Y), true
+            end
+        end
+        return nil, false
+    end
+    
+    -- R15 skeleton points
+    local skeletonMap = {
+        HeadTorso = {"Head", "UpperTorso"},
+        TorsoHip = {"UpperTorso", "LowerTorso"},
+        TorsoLeftShoulder = {"UpperTorso", "LeftUpperArm"},
+        LeftShoulderElbow = {"LeftUpperArm", "LeftLowerArm"},
+        LeftElbowHand = {"LeftLowerArm", "LeftHand"},
+        TorsoRightShoulder = {"UpperTorso", "RightUpperArm"},
+        RightShoulderElbow = {"RightUpperArm", "RightLowerArm"},
+        RightElbowHand = {"RightLowerArm", "RightHand"},
+        HipLeftKnee = {"LowerTorso", "LeftUpperLeg"},
+        LeftKneeFoot = {"LeftUpperLeg", "LeftLowerLeg"},
+        HipRightKnee = {"LowerTorso", "RightUpperLeg"},
+        RightKneeFoot = {"RightUpperLeg", "RightLowerLeg"},
+    }
+    
+    -- R6 fallback
+    local skeletonMapR6 = {
+        HeadTorso = {"Head", "Torso"},
+        TorsoLeftShoulder = {"Torso", "Left Arm"},
+        TorsoRightShoulder = {"Torso", "Right Arm"},
+        HipLeftKnee = {"Torso", "Left Leg"},
+        HipRightKnee = {"Torso", "Right Leg"},
+    }
+    
+    -- Check if R15 or R6
+    local isR15 = Char:FindFirstChild("UpperTorso") ~= nil
+    local currentMap = isR15 and skeletonMap or skeletonMapR6
+    
+    for lineName, parts in pairs(currentMap) do
+        local line = o.Skeleton[lineName]
+        if line then
+            local pos1, vis1 = GetLimbPos(parts[1])
+            local pos2, vis2 = GetLimbPos(parts[2])
+            
+            if pos1 and pos2 and vis1 and vis2 then
+                line.From = pos1
+                line.To = pos2
+                line.Color = Col
+                line.Visible = Settings.ShowSkeleton
+            else
+                line.Visible = false
+            end
+        end
+    end
 end
 
 for _, p in pairs(Players:GetPlayers()) do CreateESP(p) end
@@ -259,7 +370,16 @@ RunService.RenderStepped:Connect(function()
             o.HpBg.Visible   = false
             o.HpFill.Visible = false
         end
+        
+        -- Draw Skeleton
+        if Settings.ShowSkeleton then
+            DrawSkeleton(Player, o, Col)
+        else
+            for _, line in pairs(o.Skeleton) do
+                line.Visible = false
+            end
+        end
     end
 end)
 
-print("✅ Universal ESP (UI) by @hvhmilana | RightShift = menu")
+print("✅ Universal ESP Script loaded | RightShift = menu")

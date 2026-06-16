@@ -1,13 +1,16 @@
 --[[
-    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v3
+    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v4
     Работает во ВСЕХ Roblox играх
 
-    Изменения v3:
+    Изменения v4:
     - Видимые противники = зелёные
     - Невидимые/закрытые стеной противники = красные
     - Добавлены универсальные Chams / Highlight без привязки к PlaceId
     - Отключён рекламный Rayfield prompt: "Rayfield Interface ... sirius.menu/discord"
     - Исправлены HTML-сущности &gt; / &lt; на обычные > / <
+    - Починена загрузка/сохранение настроек Rayfield через Rayfield:LoadConfiguration()
+    - Добавлены TP к игрокам, сохранение точки, TP на сохранённую точку
+    - Добавлены Infinite Jump, SpeedHack, Noclip
 
     Open Menu: RightShift
 ]]
@@ -40,6 +43,7 @@ local Window = Rayfield:CreateWindow({
 
 local ESPTab  = Window:CreateTab("ESP Settings", 4483362458)
 local ExtraTab = Window:CreateTab("Extra Features", 4483362458)
+local MovementTab = Window:CreateTab("Movement / TP", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
 
 -- ========== SERVICES ==========
@@ -77,6 +81,12 @@ local Settings = {
     -- Chams настройки
     ChamsFillTransparency = 0.45,
     ChamsOutlineTransparency = 0,
+
+    -- Movement / TP настройки
+    SpeedHack = false,
+    WalkSpeed = 32,
+    InfiniteJump = false,
+    Noclip = false,
 }
 
 -- ========== PALETTE ==========
@@ -112,6 +122,218 @@ end
 if not ChamsFolder.Parent then
     ChamsFolder.Parent = workspace
 end
+
+
+-- ========== SMALL HELPERS ==========
+local function ClampNumber(value, minValue, maxValue, fallback)
+    local n = tonumber(value)
+    if not n then return fallback end
+    if math.clamp then
+        return math.clamp(n, minValue, maxValue)
+    end
+    return math.max(minValue, math.min(maxValue, n))
+end
+
+local function Notify(title, content, duration)
+    pcall(function()
+        Rayfield:Notify({
+            Title = tostring(title or "Universal ESP"),
+            Content = tostring(content or ""),
+            Duration = duration or 4,
+            Image = 4483362458,
+        })
+    end)
+    print("[Universal ESP] " .. tostring(title) .. " | " .. tostring(content))
+end
+
+-- ========== MOVEMENT / TP HELPERS ==========
+local NO_PLAYERS_TEXT = "Нет игроков"
+local SelectedTeleportPlayer = nil
+local SavedCFrame = nil
+local PlayerDropdown = nil
+local OriginalWalkSpeeds = {}
+local OriginalCollisions = {}
+
+local function GetCharacterRoot(char)
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+        or char:FindFirstChild("Torso")
+        or char:FindFirstChild("UpperTorso")
+end
+
+local function GetLocalRoot()
+    return GetCharacterRoot(LP.Character)
+end
+
+local function GetLocalHumanoid()
+    return LP.Character and LP.Character:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function GetPlayerNames()
+    local names = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LP then
+            table.insert(names, player.Name)
+        end
+    end
+    table.sort(names)
+    if #names == 0 then
+        table.insert(names, NO_PLAYERS_TEXT)
+    end
+    return names
+end
+
+local function RefreshPlayerDropdown()
+    if not PlayerDropdown then return end
+
+    local options = GetPlayerNames()
+
+    pcall(function()
+        PlayerDropdown:Refresh(options)
+    end)
+
+    if options[1] == NO_PLAYERS_TEXT then
+        SelectedTeleportPlayer = nil
+        pcall(function() PlayerDropdown:Set({NO_PLAYERS_TEXT}) end)
+        return
+    end
+
+    if not SelectedTeleportPlayer or not Players:FindFirstChild(SelectedTeleportPlayer) then
+        SelectedTeleportPlayer = options[1]
+        pcall(function() PlayerDropdown:Set({SelectedTeleportPlayer}) end)
+    end
+end
+
+local function TeleportToCFrame(cf)
+    local root = GetLocalRoot()
+    if not root or not cf then
+        Notify("TP", "Не найден HumanoidRootPart / точка телепорта", 3)
+        return false
+    end
+
+    pcall(function()
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    end)
+
+    root.CFrame = cf
+    return true
+end
+
+local function TeleportToSelectedPlayer()
+    if not SelectedTeleportPlayer or SelectedTeleportPlayer == NO_PLAYERS_TEXT then
+        Notify("TP к игроку", "Сначала выбери игрока в списке", 3)
+        return
+    end
+
+    local target = Players:FindFirstChild(SelectedTeleportPlayer)
+    local targetRoot = target and GetCharacterRoot(target.Character)
+
+    if not targetRoot then
+        Notify("TP к игроку", "Игрок не найден или ещё не заспавнился", 3)
+        RefreshPlayerDropdown()
+        return
+    end
+
+    -- Телепорт чуть выше и сзади выбранного игрока, чтобы не застревать в нём
+    if TeleportToCFrame(targetRoot.CFrame * CFrame.new(0, 3, 4)) then
+        Notify("TP к игроку", "Телепорт к " .. target.Name, 3)
+    end
+end
+
+local function SaveCurrentPlace()
+    local root = GetLocalRoot()
+    if not root then
+        Notify("Сохранить место", "Не найден HumanoidRootPart", 3)
+        return
+    end
+
+    SavedCFrame = root.CFrame
+    Notify("Сохранить место", "Точка сохранена", 3)
+end
+
+local function TeleportToSavedPlace()
+    if not SavedCFrame then
+        Notify("TP на точку", "Сначала нажми 'Сохранить место'", 3)
+        return
+    end
+
+    if TeleportToCFrame(SavedCFrame) then
+        Notify("TP на точку", "Телепорт выполнен", 3)
+    end
+end
+
+local function ApplyWalkSpeed()
+    local hum = GetLocalHumanoid()
+    if not hum then return end
+
+    if OriginalWalkSpeeds[hum] == nil then
+        OriginalWalkSpeeds[hum] = hum.WalkSpeed
+    end
+
+    if Settings.SpeedHack then
+        hum.WalkSpeed = ClampNumber(Settings.WalkSpeed, 16, 250, 32)
+    else
+        hum.WalkSpeed = OriginalWalkSpeeds[hum] or 16
+        OriginalWalkSpeeds[hum] = nil
+    end
+end
+
+local function ApplyNoclip()
+    if not Settings.Noclip then return end
+    if not LP.Character then return end
+
+    for _, obj in ipairs(LP.Character:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            if OriginalCollisions[obj] == nil then
+                OriginalCollisions[obj] = obj.CanCollide
+            end
+            obj.CanCollide = false
+        end
+    end
+end
+
+local function RestoreCollisions()
+    for part, oldValue in pairs(OriginalCollisions) do
+        if part and part.Parent then
+            pcall(function()
+                part.CanCollide = oldValue
+            end)
+        end
+    end
+    table.clear(OriginalCollisions)
+end
+
+UIS.JumpRequest:Connect(function()
+    if not Settings.InfiniteJump then return end
+
+    local hum = GetLocalHumanoid()
+    if hum then
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end)
+        hum.Jump = true
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if Settings.SpeedHack then
+        ApplyWalkSpeed()
+    end
+
+    if Settings.Noclip then
+        ApplyNoclip()
+    end
+end)
+
+LP.CharacterAdded:Connect(function()
+    table.clear(OriginalWalkSpeeds)
+    RestoreCollisions()
+    task.wait(0.8)
+    if Settings.SpeedHack then
+        ApplyWalkSpeed()
+    end
+end)
 
 -- ========== UI: ESP SETTINGS ==========
 ESPTab:CreateToggle({
@@ -186,7 +408,22 @@ ESPTab:CreateSlider({
     Suffix       = "studs",
     CurrentValue = Settings.MaxDistance,
     Flag         = "MaxDistance",
-    Callback     = function(v) Settings.MaxDistance = v end,
+    Callback     = function(v)
+        Settings.MaxDistance = ClampNumber(v, 100, 3000, Settings.MaxDistance)
+        print("MaxDistance:", Settings.MaxDistance)
+    end,
+})
+
+-- Если в твоём executor'е Rayfield-ползунки багуются, можно выставить дистанцию вручную здесь.
+ESPTab:CreateInput({
+    Name = "Макс. дистанция вручную",
+    CurrentValue = tostring(Settings.MaxDistance),
+    PlaceholderText = "Например: 1500",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(txt)
+        Settings.MaxDistance = ClampNumber(txt, 100, 3000, Settings.MaxDistance)
+        Notify("MaxDistance", "Установлено: " .. tostring(Settings.MaxDistance), 3)
+    end,
 })
 
 -- ========== EXTRA FEATURES TAB ==========
@@ -219,7 +456,20 @@ ExtraTab:CreateSlider({
     Suffix       = "studs",
     CurrentValue = Settings.AimLineLength,
     Flag         = "AimLineLength",
-    Callback     = function(v) Settings.AimLineLength = v end,
+    Callback     = function(v)
+        Settings.AimLineLength = ClampNumber(v, 5, 50, Settings.AimLineLength)
+    end,
+})
+
+ExtraTab:CreateInput({
+    Name = "Длина AIM DIR вручную",
+    CurrentValue = tostring(Settings.AimLineLength),
+    PlaceholderText = "Например: 15",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(txt)
+        Settings.AimLineLength = ClampNumber(txt, 5, 50, Settings.AimLineLength)
+        Notify("AimLineLength", "Установлено: " .. tostring(Settings.AimLineLength), 3)
+    end,
 })
 
 ExtraTab:CreateSlider({
@@ -229,420 +479,199 @@ ExtraTab:CreateSlider({
     Suffix       = "px",
     CurrentValue = Settings.SkeletonThickness,
     Flag         = "SkeletonThickness",
-    Callback     = function(v) Settings.SkeletonThickness = v end,
+    Callback     = function(v)
+        Settings.SkeletonThickness = ClampNumber(v, 1, 5, Settings.SkeletonThickness)
+    end,
+})
+
+ExtraTab:CreateInput({
+    Name = "Толщина скелета вручную",
+    CurrentValue = tostring(Settings.SkeletonThickness),
+    PlaceholderText = "1-5",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(txt)
+        Settings.SkeletonThickness = ClampNumber(txt, 1, 5, Settings.SkeletonThickness)
+        Notify("SkeletonThickness", "Установлено: " .. tostring(Settings.SkeletonThickness), 3)
+    end,
+})
+
+-- ========== MOVEMENT / TP TAB ==========
+local initialPlayerOptions = GetPlayerNames()
+if initialPlayerOptions[1] ~= NO_PLAYERS_TEXT then
+    SelectedTeleportPlayer = initialPlayerOptions[1]
+end
+
+PlayerDropdown = MovementTab:CreateDropdown({
+    Name = "Игрок для TP",
+    Options = initialPlayerOptions,
+    CurrentOption = {initialPlayerOptions[1]},
+    MultipleOptions = false,
+    Callback = function(option)
+        local selected = option
+        if type(option) == "table" then
+            selected = option[1]
+        end
+
+        if selected and selected ~= NO_PLAYERS_TEXT then
+            SelectedTeleportPlayer = selected
+            print("Выбран игрок для TP:", selected)
+        else
+            SelectedTeleportPlayer = nil
+        end
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "🔄 Обновить список игроков",
+    Callback = function()
+        RefreshPlayerDropdown()
+        Notify("Список игроков", "Обновлён", 2)
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "➡️ TP к выбранному игроку",
+    Callback = function()
+        TeleportToSelectedPlayer()
+    end,
+})
+
+MovementTab:CreateDivider()
+
+MovementTab:CreateButton({
+    Name = "💾 Сохранить место",
+    Callback = function()
+        SaveCurrentPlace()
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "📍 TP на сохранённое место",
+    Callback = function()
+        TeleportToSavedPlace()
+    end,
+})
+
+MovementTab:CreateDivider()
+
+MovementTab:CreateToggle({
+    Name = "♾️ Бесконечный прыжок",
+    CurrentValue = Settings.InfiniteJump,
+    Flag = "InfiniteJump",
+    Callback = function(v)
+        Settings.InfiniteJump = v
+        Notify("Infinite Jump", v and "ВКЛ" or "ВЫКЛ", 2)
+    end,
+})
+
+local SpeedToggle = MovementTab:CreateToggle({
+    Name = "🏃 SpeedHack",
+    CurrentValue = Settings.SpeedHack,
+    Flag = "SpeedHack",
+    Callback = function(v)
+        Settings.SpeedHack = v
+        ApplyWalkSpeed()
+        Notify("SpeedHack", v and ("ВКЛ: " .. tostring(Settings.WalkSpeed)) or "ВЫКЛ", 2)
+    end,
+})
+
+MovementTab:CreateSlider({
+    Name = "Скорость WalkSpeed",
+    Range = {16, 250},
+    Increment = 1,
+    Suffix = "WS",
+    CurrentValue = Settings.WalkSpeed,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        Settings.WalkSpeed = ClampNumber(v, 16, 250, Settings.WalkSpeed)
+        ApplyWalkSpeed()
+        print("WalkSpeed:", Settings.WalkSpeed)
+    end,
+})
+
+-- Дубль через ручной ввод — на случай если Rayfield-ползунок в executor'е не двигается.
+MovementTab:CreateInput({
+    Name = "Скорость вручную",
+    CurrentValue = tostring(Settings.WalkSpeed),
+    PlaceholderText = "Например: 50",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(txt)
+        Settings.WalkSpeed = ClampNumber(txt, 16, 250, Settings.WalkSpeed)
+        ApplyWalkSpeed()
+        Notify("WalkSpeed", "Установлено: " .. tostring(Settings.WalkSpeed), 3)
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "Скорость 16 / Reset",
+    Callback = function()
+        Settings.WalkSpeed = 16
+        table.clear(OriginalWalkSpeeds)
+        local hum = GetLocalHumanoid()
+        if hum then hum.WalkSpeed = 16 end
+
+        if SpeedToggle and SpeedToggle.Set then
+            SpeedToggle:Set(false)
+        else
+            Settings.SpeedHack = false
+            ApplyWalkSpeed()
+        end
+
+        Notify("WalkSpeed", "Сброшено на 16", 2)
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "Скорость 50",
+    Callback = function()
+        Settings.WalkSpeed = 50
+
+        if SpeedToggle and SpeedToggle.Set then
+            SpeedToggle:Set(true)
+        else
+            Settings.SpeedHack = true
+            ApplyWalkSpeed()
+        end
+
+        Notify("WalkSpeed", "Установлено 50", 2)
+    end,
+})
+
+MovementTab:CreateButton({
+    Name = "Скорость 100",
+    Callback = function()
+        Settings.WalkSpeed = 100
+
+        if SpeedToggle and SpeedToggle.Set then
+            SpeedToggle:Set(true)
+        else
+            Settings.SpeedHack = true
+            ApplyWalkSpeed()
+        end
+
+        Notify("WalkSpeed", "Установлено 100", 2)
+    end,
+})
+
+MovementTab:CreateToggle({
+    Name = "🚪 Noclip",
+    CurrentValue = Settings.Noclip,
+    Flag = "Noclip",
+    Callback = function(v)
+        Settings.Noclip = v
+        if not v then
+            RestoreCollisions()
+        end
+        Notify("Noclip", v and "ВКЛ" or "ВЫКЛ", 2)
+    end,
 })
 
 -- ========== INFO TAB ==========
 InfoTab:CreateParagraph({
-    Title   = "Universal ESP Script [ENHANCED v3]",
-    Content = "Работает во ВСЕХ Roblox играх!\n\n🆕 ДОБАВЛЕНО:\n• Видимый противник = зелёный\n• Не видимый/за стеной = красный\n• Универсальные Chams / Highlight без game.PlaceId\n• Отключён Rayfield рекламный prompt\n\nОСНОВНЫЕ ФУНКЦИИ:\n• Box ESP\n• Chams ESP\n• Skeleton ESP\n• Tracers\n• Имя, HP, Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
+    Title   = "Universal ESP Script [ENHANCED v4]",
+    Content = "Работает во ВСЕХ Roblox играх!\n\n🆕 ДОБАВЛЕНО:\n• Видимый противник = зелёный\n• Не видимый/за стеной = красный\n• Универсальные Chams / Highlight без game.PlaceId\n• Отключён Rayfield рекламный prompt\n• TP к игрокам / TP на сохранённую точку\n• Infinite Jump / SpeedHack / Noclip\n\nОСНОВНЫЕ ФУНКЦИИ:\n• Box ESP\n• Chams ESP\n• Skeleton ESP\n• Tracers\n• Имя, HP, Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
 })
 
--- ========== GENERIC OBJECT HELPERS ==========
-local function SetObjectVisible(obj, state)
-    if not obj then return end
-
-    if typeof(obj) == "Instance" then
-        if obj:IsA("Highlight") then
-            obj.Enabled = state
-        elseif obj:IsA("GuiObject") then
-            obj.Visible = state
-        end
-    else
-        pcall(function()
-            obj.Visible = state
-        end)
-    end
-end
-
-local function RemoveObject(obj)
-    if not obj then return end
-
-    pcall(function()
-        if typeof(obj) == "Instance" then
-            obj:Destroy()
-        else
-            obj:Remove()
-        end
-    end)
-end
-
--- ========== HELPERS ==========
--- УНИВЕРСАЛЬНАЯ ПРОВЕРКА НА СОЮЗНИКА
-local function IsTeammate(Player)
-    if not Settings.TeamCheck then return false end
-
-    -- Проверка 1: По команде Roblox
-    if LP.Team and Player.Team then
-        if LP.Team == Player.Team then
-            return true
-        end
-    end
-
-    -- Проверка 2: По родителю персонажа.
-    -- Важно: в большинстве игр все персонажи лежат прямо в workspace,
-    -- поэтому workspace НЕ считаем "одной командой", иначе ESP скроет всех игроков.
-    local lc = LP.Character
-    local pc = Player.Character
-    if lc and pc then
-        if lc.Parent and pc.Parent and lc.Parent == pc.Parent and lc.Parent ~= workspace then
-            return true
-        end
-    end
-
-    return false
-end
-
--- Цвет ESP: враг виден = зелёный, не виден = красный
-local function GetColor(Player, IsVisible)
-    if IsTeammate(Player) then
-        return Settings.TeamColor
-    end
-
-    return IsVisible and Settings.VisibleColor or Settings.HiddenColor
-end
-
--- Цвет здоровья
-local function GetHealthColor(hp, max)
-    local pct = hp / max
-    if pct > 0.6 then return Palette.HealthHigh end
-    if pct > 0.3 then return Palette.HealthMid end
-    return Palette.HealthLow
-end
-
--- Проверка Line Of Sight: есть ли прямая видимость до части персонажа
-local function IsPartVisibleToCamera(part, targetChar)
-    if not Camera or not part or not part:IsA("BasePart") or not targetChar then
-        return false
-    end
-
-    local origin = Camera.CFrame.Position
-    local target = part.Position
-    local direction = target - origin
-
-    if direction.Magnitude <= 0.1 then
-        return true
-    end
-
-    local ignoreList = {}
-
-    if LP.Character then
-        table.insert(ignoreList, LP.Character)
-    end
-
-    -- Иногда камера может иметь собственные части/объекты
-    pcall(function()
-        table.insert(ignoreList, Camera)
-    end)
-
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignoreList
-    params.IgnoreWater = true
-
-    local currentOrigin = origin
-    local maxChecks = 8
-
-    for _ = 1, maxChecks do
-        local currentDirection = target - currentOrigin
-        if currentDirection.Magnitude <= 0.1 then
-            return true
-        end
-
-        local result = workspace:Raycast(currentOrigin, currentDirection, params)
-
-        -- Если ничего не попали, значит между камерой и точкой нет препятствий
-        if not result then
-            return true
-        end
-
-        local hit = result.Instance
-
-        -- Если первым попали в нужного игрока — он виден
-        if hit and hit:IsDescendantOf(targetChar) then
-            return true
-        end
-
-        -- Пропускаем почти прозрачные / неколлизионные объекты, чтобы стекло/декор не ломали проверку
-        local canSkip = false
-        pcall(function()
-            canSkip = (hit.Transparency >= 0.75) or (hit.CanCollide == false)
-        end)
-
-        if canSkip and hit then
-            table.insert(ignoreList, hit)
-            params.FilterDescendantsInstances = ignoreList
-            currentOrigin = result.Position + currentDirection.Unit * 0.05
-        else
-            return false
-        end
-    end
-
-    return false
-end
-
-local function IsCharacterVisible(char)
-    if not char then return false end
-
-    -- Проверяем несколько важных частей, чтобы видимость не зависела только от HumanoidRootPart
-    local partNames = {
-        "Head",
-        "UpperTorso",
-        "Torso",
-        "HumanoidRootPart",
-        "LowerTorso",
-        "LeftUpperArm",
-        "RightUpperArm",
-        "Left Arm",
-        "Right Arm",
-    }
-
-    for _, name in ipairs(partNames) do
-        local part = char:FindFirstChild(name)
-        if part and part:IsA("BasePart") then
-            if IsPartVisibleToCamera(part, char) then
-                return true
-            end
-        end
-    end
-
-    return false
-end
-
--- УНИВЕРСАЛЬНАЯ ПРОВЕРКА "смотрит на тебя"
-local function IsLookingAtYou(char)
-    if not LP.Character then return false end
-
-    local myHead = LP.Character:FindFirstChild("Head") or LP.Character:FindFirstChild("HumanoidRootPart")
-    local head = char:FindFirstChild("Head")
-
-    if not myHead or not head then return false end
-
-    local success, result = pcall(function()
-        local toYou = (myHead.Position - head.Position).Unit
-        local lookVector = head.CFrame.LookVector
-        return toYou:Dot(lookVector) > 0.85
-    end)
-
-    return success and result or false
-end
-
--- ========== ESP OBJECTS ==========
-local ESPCache = {}
-
-local function NewLine(thickness, transp)
-    local l = Drawing.new("Line")
-    l.Thickness    = thickness or 1.5
-    l.Transparency = transp    or 0.7
-    l.Visible      = false
-    return l
-end
-
-local function NewText(size)
-    local t = Drawing.new("Text")
-    t.Size    = size or 12
-    t.Center  = true
-    t.Outline = true
-    t.Font    = 2
-    t.Visible = false
-    return t
-end
-
-local function NewChams()
-    local h = Instance.new("Highlight")
-    h.Name = "UniversalESP_Chams_Highlight"
-    h.Enabled = false
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- видно через стены
-    h.FillTransparency = Settings.ChamsFillTransparency
-    h.OutlineTransparency = Settings.ChamsOutlineTransparency
-    h.Parent = ChamsFolder
-    return h
-end
-
-local function CreateESP(Player)
-    if Player == LP then return end
-    if ESPCache[Player] then return end
-
-    -- Skeleton lines
-    local SkeletonLines = {
-        -- R15 bones
-        HeadTorso = NewLine(Settings.SkeletonThickness, 0.8),
-        TorsoHip = NewLine(Settings.SkeletonThickness, 0.8),
-        TorsoLeftShoulder = NewLine(Settings.SkeletonThickness, 0.8),
-        LeftShoulderElbow = NewLine(Settings.SkeletonThickness, 0.8),
-        LeftElbowHand = NewLine(Settings.SkeletonThickness, 0.8),
-        TorsoRightShoulder = NewLine(Settings.SkeletonThickness, 0.8),
-        RightShoulderElbow = NewLine(Settings.SkeletonThickness, 0.8),
-        RightElbowHand = NewLine(Settings.SkeletonThickness, 0.8),
-        HipLeftKnee = NewLine(Settings.SkeletonThickness, 0.8),
-        LeftKneeFoot = NewLine(Settings.SkeletonThickness, 0.8),
-        HipRightKnee = NewLine(Settings.SkeletonThickness, 0.8),
-        RightKneeFoot = NewLine(Settings.SkeletonThickness, 0.8),
-    }
-
-    ESPCache[Player] = {
-        BoxTop   = NewLine(),
-        BoxBot   = NewLine(),
-        BoxLeft  = NewLine(),
-        BoxRight = NewLine(),
-        Tracer   = NewLine(1, 0.8),
-        Name     = NewText(12),
-        Distance = NewText(10),
-        HpBg     = NewLine(4, 1),
-        HpFill   = NewLine(4, 1),
-        Skeleton = SkeletonLines,
-        AimLine  = NewLine(2, 0.9),
-        LookingText = NewText(13),
-        Chams = NewChams(),
-    }
-
-    ESPCache[Player].HpBg.Color = Palette.HealthBg
-    ESPCache[Player].Distance.Font = 1
-    ESPCache[Player].LookingText.Color = Palette.LookingAtYou
-end
-
-local function RemoveESP(Player)
-    local o = ESPCache[Player]
-    if not o then return end
-
-    for _, d in pairs(o) do
-        if type(d) == "table" then
-            for _, obj in pairs(d) do
-                RemoveObject(obj)
-            end
-        else
-            RemoveObject(d)
-        end
-    end
-
-    ESPCache[Player] = nil
-end
-
-local function HideESP(o)
-    for _, d in pairs(o) do
-        if type(d) == "table" then
-            for _, obj in pairs(d) do
-                SetObjectVisible(obj, false)
-            end
-        else
-            SetObjectVisible(d, false)
-        end
-    end
-end
-
-local function UpdateChams(Player, o, Char, Col)
-    if not o.Chams then return end
-
-    if Settings.ShowChams and Char then
-        if o.Chams.Adornee ~= Char then
-            o.Chams.Adornee = Char
-        end
-
-        o.Chams.FillColor = Col
-        o.Chams.OutlineColor = Col
-        o.Chams.FillTransparency = Settings.ChamsFillTransparency
-        o.Chams.OutlineTransparency = Settings.ChamsOutlineTransparency
-        o.Chams.Enabled = true
-    else
-        o.Chams.Enabled = false
-    end
-end
-
--- ========== УЛУЧШЕННАЯ УНИВЕРСАЛЬНАЯ ФУНКЦИЯ СКЕЛЕТА ==========
-local function DrawSkeleton(Player, o, Col)
-    local Char = Player.Character
-    if not Char then return end
-
-    -- Сначала скрываем все кости, чтобы при смене R15/R6 не оставались старые линии
-    for _, line in pairs(o.Skeleton) do
-        line.Visible = false
-    end
-
-    local function GetLimbPos(partName)
-        local part = Char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            local success, pos, onScreen = pcall(function()
-                local p, isOnScreen = Camera:WorldToViewportPoint(part.Position)
-                return p, isOnScreen
-            end)
-
-            if success and onScreen and pos.Z > 0 then
-                return Vector2.new(pos.X, pos.Y), true
-            end
-        end
-
-        return nil, false
-    end
-
-    -- R15 skeleton map
-    local skeletonMapR15 = {
-        HeadTorso = {"Head", "UpperTorso"},
-        TorsoHip = {"UpperTorso", "LowerTorso"},
-        TorsoLeftShoulder = {"UpperTorso", "LeftUpperArm"},
-        LeftShoulderElbow = {"LeftUpperArm", "LeftLowerArm"},
-        LeftElbowHand = {"LeftLowerArm", "LeftHand"},
-        TorsoRightShoulder = {"UpperTorso", "RightUpperArm"},
-        RightShoulderElbow = {"RightUpperArm", "RightLowerArm"},
-        RightElbowHand = {"RightLowerArm", "RightHand"},
-        HipLeftKnee = {"LowerTorso", "LeftUpperLeg"},
-        LeftKneeFoot = {"LeftUpperLeg", "LeftLowerLeg"},
-        HipRightKnee = {"LowerTorso", "RightUpperLeg"},
-        RightKneeFoot = {"RightUpperLeg", "RightLowerLeg"},
-    }
-
-    -- R6 skeleton map
-    local skeletonMapR6 = {
-        HeadTorso = {"Head", "Torso"},
-        TorsoLeftShoulder = {"Torso", "Left Arm"},
-        TorsoRightShoulder = {"Torso", "Right Arm"},
-        HipLeftKnee = {"Torso", "Left Leg"},
-        HipRightKnee = {"Torso", "Right Leg"},
-    }
-
-    -- Определяем тип рига
-    local isR15 = Char:FindFirstChild("UpperTorso") ~= nil
-    local currentMap = isR15 and skeletonMapR15 or skeletonMapR6
-
-    for lineName, parts in pairs(currentMap) do
-        local line = o.Skeleton[lineName]
-        if line then
-            local pos1, vis1 = GetLimbPos(parts[1])
-            local pos2, vis2 = GetLimbPos(parts[2])
-
-            if pos1 and pos2 and vis1 and vis2 then
-                line.From = pos1
-                line.To = pos2
-                line.Color = Col
-                line.Thickness = Settings.SkeletonThickness
-                line.Visible = true
-            else
-                line.Visible = false
-            end
-        end
-    end
-end
-
--- ========== УНИВЕРСАЛЬНАЯ ФУНКЦИЯ: НАПРАВЛЕНИЕ ВЗГЛЯДА ==========
-local function DrawAimDirection(Player, o, Col)
-    if not Settings.ShowAimDir then
-        o.AimLine.Visible = false
-        return
-    end
-
-    local Char = Player.Character
-    if not Char then
-        o.AimLine.Visible = false
-        return
-    end
-
-    local head = Char:FindFirstChild("Head")
-    if not head or not head:IsA("BasePart") then
-        o.AimLine.Visible = false
-        return
-    end
-
-    local success, result = pcall(function()
-        local aimEnd = head.Position + head.CFrame.LookVector * Settings.AimLineLength
         local headScreen, headOn = Camera:WorldToViewportPoint(head.Position)
         local aimScreen, aimOn = Camera:WorldToViewportPoint(aimEnd)
 
@@ -663,8 +692,20 @@ local function DrawAimDirection(Player, o, Col)
 end
 
 for _, p in pairs(Players:GetPlayers()) do CreateESP(p) end
-Players.PlayerAdded:Connect(CreateESP)
-Players.PlayerRemoving:Connect(RemoveESP)
+Players.PlayerAdded:Connect(function(p)
+    CreateESP(p)
+    task.defer(RefreshPlayerDropdown)
+end)
+Players.PlayerRemoving:Connect(function(p)
+    RemoveESP(p)
+    task.defer(RefreshPlayerDropdown)
+end)
+
+-- Загружаем сохранённые настройки Rayfield после создания всех элементов UI.
+-- Это также фиксит ситуацию, когда ползунки/переключатели визуально менялись, но после перезапуска значения сбрасывались.
+pcall(function()
+    Rayfield:LoadConfiguration()
+end)
 
 -- ========== MAIN LOOP ==========
 RunService.RenderStepped:Connect(function()
@@ -817,7 +858,8 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("✅ Universal ESP Script [ENHANCED v3] loaded | RightShift = menu")
+print("✅ Universal ESP Script [ENHANCED v4] loaded | RightShift = menu")
 print("🟢 Видимые противники = зелёные | 🔴 Не видимые = красные")
 print("✨ Chams / Highlight ESP добавлены без привязки к PlaceId")
 print("🚫 Rayfield рекламный prompt отключён")
+print("🧭 Movement / TP: TP к игрокам, save point TP, Infinite Jump, speed hack,noclip")

@@ -1,11 +1,14 @@
 --[[
-    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v2
+    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v3
     Работает во ВСЕХ Roblox играх
-    Новые функции:
-    - Улучшенный Skeleton ESP (R6/R15)
-    - Индикатор направления взгляда (вкл/выкл)
-    - Предупреждение "Смотрит на тебя" (вкл/выкл)
-    - Улучшенная полоска здоровья
+
+    Изменения v3:
+    - Видимые противники = зелёные
+    - Невидимые/закрытые стеной противники = красные
+    - Добавлены универсальные Chams / Highlight без привязки к PlaceId
+    - Отключён рекламный Rayfield prompt: "Rayfield Interface ... sirius.menu/discord"
+    - Исправлены HTML-сущности &gt; / &lt; на обычные > / <
+
     Open Menu: RightShift
 ]]
 
@@ -18,12 +21,21 @@ local Window = Rayfield:CreateWindow({
     Icon  = 4483362458,
     LoadingTitle    = "Universal ESP Script",
     LoadingSubtitle = "Loading Enhanced Version...",
+
+    -- Убирает периодическое уведомление:
+    -- "Rayfield Interface / Enjoying this UI library? Find it at sirius.menu/discord"
+    DisableRayfieldPrompts = true,
+    DisableBuildWarnings = true,
+
     ConfigurationSaving = {
         Enabled    = true,
         FolderName = "UniversalESPScript",
         FileName   = "ESPSettings"
     },
+
+    -- Оставил старое поле + новое поле Rayfield, чтобы работало на разных версиях библиотеки
     Keybind = Enum.KeyCode.RightShift,
+    ToggleUIKeybind = Enum.KeyCode.RightShift,
 })
 
 local ESPTab  = Window:CreateTab("ESP Settings", 4483362458)
@@ -47,13 +59,24 @@ local Settings = {
     ShowHealth   = true,
     ShowDistance = true,
     ShowSkeleton = true,
-    ShowAimDir   = false,  -- ИЗМЕНЕНО: выключено по умолчанию
-    ShowLookingAtYou = false, -- ИЗМЕНЕНО: выключено по умолчанию
+    ShowChams    = true,  -- НОВОЕ: Chams / Highlight ESP
+    ShowAimDir   = false,
+    ShowLookingAtYou = false,
     MaxDistance  = 1500,
-    EnemyColor   = Color3.fromRGB(255, 50,  50),
-    TeamColor    = Color3.fromRGB(50,  150, 255),
+
+    -- НОВОЕ: цвет зависит от видимости противника
+    VisibleColor = Color3.fromRGB(50, 255, 80),   -- виден = зелёный
+    HiddenColor  = Color3.fromRGB(255, 50, 50),   -- не виден = красный
+
+    -- Для союзников, если TeamCheck выключен/меняется логика
+    TeamColor    = Color3.fromRGB(50, 150, 255),
+
     SkeletonThickness = 2,
     AimLineLength = 15,
+
+    -- Chams настройки
+    ChamsFillTransparency = 0.45,
+    ChamsOutlineTransparency = 0,
 }
 
 -- ========== PALETTE ==========
@@ -65,6 +88,30 @@ local Palette = {
     LookingAtYou = Color3.fromRGB(255, 255, 0),
     AimDir = Color3.fromRGB(255, 150, 0),
 }
+
+-- ========== CHAMS FOLDER ==========
+local ChamsFolder = Instance.new("Folder")
+ChamsFolder.Name = "UniversalESP_Chams"
+
+pcall(function()
+    local CoreGui = game:GetService("CoreGui")
+    local old = CoreGui:FindFirstChild(ChamsFolder.Name)
+    if old then old:Destroy() end
+    ChamsFolder.Parent = CoreGui
+end)
+
+if not ChamsFolder.Parent then
+    pcall(function()
+        local PlayerGui = LP:WaitForChild("PlayerGui")
+        local old = PlayerGui:FindFirstChild(ChamsFolder.Name)
+        if old then old:Destroy() end
+        ChamsFolder.Parent = PlayerGui
+    end)
+end
+
+if not ChamsFolder.Parent then
+    ChamsFolder.Parent = workspace
+end
 
 -- ========== UI: ESP SETTINGS ==========
 ESPTab:CreateToggle({
@@ -105,6 +152,13 @@ ESPTab:CreateToggle({
 })
 
 ESPTab:CreateToggle({
+    Name         = "Chams / Highlight ESP",
+    CurrentValue = Settings.ShowChams,
+    Flag         = "ChamsESP",
+    Callback     = function(v) Settings.ShowChams = v end,
+})
+
+ESPTab:CreateToggle({
     Name         = "Имя игрока",
     CurrentValue = Settings.ShowName,
     Flag         = "NameESP",
@@ -135,13 +189,13 @@ ESPTab:CreateSlider({
     Callback     = function(v) Settings.MaxDistance = v end,
 })
 
--- ========== EXTRA FEATURES TAB (с кнопками вкл/выкл) ==========
+-- ========== EXTRA FEATURES TAB ==========
 ExtraTab:CreateToggle({
     Name         = "🎯 Направление взгляда (AIM DIR)",
     CurrentValue = Settings.ShowAimDir,
     Flag         = "AimDir",
-    Callback     = function(v) 
-        Settings.ShowAimDir = v 
+    Callback     = function(v)
+        Settings.ShowAimDir = v
         print("Направление взгляда:", v and "ВКЛ" or "ВЫКЛ")
     end,
 })
@@ -150,8 +204,8 @@ ExtraTab:CreateToggle({
     Name         = "👁️ Предупреждение 'Смотрит на тебя'",
     CurrentValue = Settings.ShowLookingAtYou,
     Flag         = "LookingAtYou",
-    Callback     = function(v) 
-        Settings.ShowLookingAtYou = v 
+    Callback     = function(v)
+        Settings.ShowLookingAtYou = v
         print("Предупреждение 'Смотрит на тебя':", v and "ВКЛ" or "ВЫКЛ")
     end,
 })
@@ -180,36 +234,72 @@ ExtraTab:CreateSlider({
 
 -- ========== INFO TAB ==========
 InfoTab:CreateParagraph({
-    Title   = "Universal ESP Script [ENHANCED]",
-    Content = "Работает во ВСЕХ Roblox играх!\n\n🆕 НОВЫЕ ФУНКЦИИ:\n• Направление взгляда (вкл/выкл)\n• Предупреждение 'Смотрит на тебя' (вкл/выкл)\n• Улучшенный скелет (R6/R15)\n• Цветная полоска HP\n\nОСНОВНЫЕ ФУНКЦИИ:\n• Box ESP\n• Skeleton ESP\n• Tracers\n• Имя, HP, Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню\n\n⚠️ Если что-то не работает, отключите новые функции во вкладке Extra Features"
+    Title   = "Universal ESP Script [ENHANCED v3]",
+    Content = "Работает во ВСЕХ Roblox играх!\n\n🆕 ДОБАВЛЕНО:\n• Видимый противник = зелёный\n• Не видимый/за стеной = красный\n• Универсальные Chams / Highlight без game.PlaceId\n• Отключён Rayfield рекламный prompt\n\nОСНОВНЫЕ ФУНКЦИИ:\n• Box ESP\n• Chams ESP\n• Skeleton ESP\n• Tracers\n• Имя, HP, Дистанция\n• Team Check\n\nУПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
 })
 
+-- ========== GENERIC OBJECT HELPERS ==========
+local function SetObjectVisible(obj, state)
+    if not obj then return end
+
+    if typeof(obj) == "Instance" then
+        if obj:IsA("Highlight") then
+            obj.Enabled = state
+        elseif obj:IsA("GuiObject") then
+            obj.Visible = state
+        end
+    else
+        pcall(function()
+            obj.Visible = state
+        end)
+    end
+end
+
+local function RemoveObject(obj)
+    if not obj then return end
+
+    pcall(function()
+        if typeof(obj) == "Instance" then
+            obj:Destroy()
+        else
+            obj:Remove()
+        end
+    end)
+end
+
 -- ========== HELPERS ==========
--- УНИВЕРСАЛЬНАЯ ПРОВЕРКА НА СОЮЗНИКА (работает везде)
+-- УНИВЕРСАЛЬНАЯ ПРОВЕРКА НА СОЮЗНИКА
 local function IsTeammate(Player)
     if not Settings.TeamCheck then return false end
-    
+
     -- Проверка 1: По команде Roblox
     if LP.Team and Player.Team then
-        if LP.Team == Player.Team then 
-            return true 
-        end
-    end
-    
-    -- Проверка 2: По родителю персонажа (универсальная)
-    local lc = LP.Character
-    local pc = Player.Character
-    if lc and pc then
-        if lc.Parent and pc.Parent and lc.Parent == pc.Parent then
+        if LP.Team == Player.Team then
             return true
         end
     end
-    
+
+    -- Проверка 2: По родителю персонажа.
+    -- Важно: в большинстве игр все персонажи лежат прямо в workspace,
+    -- поэтому workspace НЕ считаем "одной командой", иначе ESP скроет всех игроков.
+    local lc = LP.Character
+    local pc = Player.Character
+    if lc and pc then
+        if lc.Parent and pc.Parent and lc.Parent == pc.Parent and lc.Parent ~= workspace then
+            return true
+        end
+    end
+
     return false
 end
 
-local function GetColor(Player)
-    return IsTeammate(Player) and Settings.TeamColor or Settings.EnemyColor
+-- Цвет ESP: враг виден = зелёный, не виден = красный
+local function GetColor(Player, IsVisible)
+    if IsTeammate(Player) then
+        return Settings.TeamColor
+    end
+
+    return IsVisible and Settings.VisibleColor or Settings.HiddenColor
 end
 
 -- Цвет здоровья
@@ -220,22 +310,120 @@ local function GetHealthColor(hp, max)
     return Palette.HealthLow
 end
 
+-- Проверка Line Of Sight: есть ли прямая видимость до части персонажа
+local function IsPartVisibleToCamera(part, targetChar)
+    if not Camera or not part or not part:IsA("BasePart") or not targetChar then
+        return false
+    end
+
+    local origin = Camera.CFrame.Position
+    local target = part.Position
+    local direction = target - origin
+
+    if direction.Magnitude <= 0.1 then
+        return true
+    end
+
+    local ignoreList = {}
+
+    if LP.Character then
+        table.insert(ignoreList, LP.Character)
+    end
+
+    -- Иногда камера может иметь собственные части/объекты
+    pcall(function()
+        table.insert(ignoreList, Camera)
+    end)
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = ignoreList
+    params.IgnoreWater = true
+
+    local currentOrigin = origin
+    local maxChecks = 8
+
+    for _ = 1, maxChecks do
+        local currentDirection = target - currentOrigin
+        if currentDirection.Magnitude <= 0.1 then
+            return true
+        end
+
+        local result = workspace:Raycast(currentOrigin, currentDirection, params)
+
+        -- Если ничего не попали, значит между камерой и точкой нет препятствий
+        if not result then
+            return true
+        end
+
+        local hit = result.Instance
+
+        -- Если первым попали в нужного игрока — он виден
+        if hit and hit:IsDescendantOf(targetChar) then
+            return true
+        end
+
+        -- Пропускаем почти прозрачные / неколлизионные объекты, чтобы стекло/декор не ломали проверку
+        local canSkip = false
+        pcall(function()
+            canSkip = (hit.Transparency >= 0.75) or (hit.CanCollide == false)
+        end)
+
+        if canSkip and hit then
+            table.insert(ignoreList, hit)
+            params.FilterDescendantsInstances = ignoreList
+            currentOrigin = result.Position + currentDirection.Unit * 0.05
+        else
+            return false
+        end
+    end
+
+    return false
+end
+
+local function IsCharacterVisible(char)
+    if not char then return false end
+
+    -- Проверяем несколько важных частей, чтобы видимость не зависела только от HumanoidRootPart
+    local partNames = {
+        "Head",
+        "UpperTorso",
+        "Torso",
+        "HumanoidRootPart",
+        "LowerTorso",
+        "LeftUpperArm",
+        "RightUpperArm",
+        "Left Arm",
+        "Right Arm",
+    }
+
+    for _, name in ipairs(partNames) do
+        local part = char:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            if IsPartVisibleToCamera(part, char) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 -- УНИВЕРСАЛЬНАЯ ПРОВЕРКА "смотрит на тебя"
 local function IsLookingAtYou(char)
     if not LP.Character then return false end
-    
+
     local myHead = LP.Character:FindFirstChild("Head") or LP.Character:FindFirstChild("HumanoidRootPart")
     local head = char:FindFirstChild("Head")
-    
+
     if not myHead or not head then return false end
-    
-    -- Безопасная проверка CFrame
+
     local success, result = pcall(function()
         local toYou = (myHead.Position - head.Position).Unit
         local lookVector = head.CFrame.LookVector
         return toYou:Dot(lookVector) > 0.85
     end)
-    
+
     return success and result or false
 end
 
@@ -260,10 +448,21 @@ local function NewText(size)
     return t
 end
 
+local function NewChams()
+    local h = Instance.new("Highlight")
+    h.Name = "UniversalESP_Chams_Highlight"
+    h.Enabled = false
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- видно через стены
+    h.FillTransparency = Settings.ChamsFillTransparency
+    h.OutlineTransparency = Settings.ChamsOutlineTransparency
+    h.Parent = ChamsFolder
+    return h
+end
+
 local function CreateESP(Player)
     if Player == LP then return end
     if ESPCache[Player] then return end
-    
+
     -- Skeleton lines
     local SkeletonLines = {
         -- R15 bones
@@ -280,7 +479,7 @@ local function CreateESP(Player)
         HipRightKnee = NewLine(Settings.SkeletonThickness, 0.8),
         RightKneeFoot = NewLine(Settings.SkeletonThickness, 0.8),
     }
-    
+
     ESPCache[Player] = {
         BoxTop   = NewLine(),
         BoxBot   = NewLine(),
@@ -294,7 +493,9 @@ local function CreateESP(Player)
         Skeleton = SkeletonLines,
         AimLine  = NewLine(2, 0.9),
         LookingText = NewText(13),
+        Chams = NewChams(),
     }
+
     ESPCache[Player].HpBg.Color = Palette.HealthBg
     ESPCache[Player].Distance.Font = 1
     ESPCache[Player].LookingText.Color = Palette.LookingAtYou
@@ -303,27 +504,47 @@ end
 local function RemoveESP(Player)
     local o = ESPCache[Player]
     if not o then return end
-    for _, d in pairs(o) do 
+
+    for _, d in pairs(o) do
         if type(d) == "table" then
-            for _, line in pairs(d) do
-                pcall(function() line:Remove() end)
+            for _, obj in pairs(d) do
+                RemoveObject(obj)
             end
         else
-            pcall(function() d:Remove() end)
+            RemoveObject(d)
         end
     end
+
     ESPCache[Player] = nil
 end
 
 local function HideESP(o)
-    for _, d in pairs(o) do 
+    for _, d in pairs(o) do
         if type(d) == "table" then
-            for _, line in pairs(d) do
-                line.Visible = false
+            for _, obj in pairs(d) do
+                SetObjectVisible(obj, false)
             end
         else
-            d.Visible = false
+            SetObjectVisible(d, false)
         end
+    end
+end
+
+local function UpdateChams(Player, o, Char, Col)
+    if not o.Chams then return end
+
+    if Settings.ShowChams and Char then
+        if o.Chams.Adornee ~= Char then
+            o.Chams.Adornee = Char
+        end
+
+        o.Chams.FillColor = Col
+        o.Chams.OutlineColor = Col
+        o.Chams.FillTransparency = Settings.ChamsFillTransparency
+        o.Chams.OutlineTransparency = Settings.ChamsOutlineTransparency
+        o.Chams.Enabled = true
+    else
+        o.Chams.Enabled = false
     end
 end
 
@@ -331,21 +552,28 @@ end
 local function DrawSkeleton(Player, o, Col)
     local Char = Player.Character
     if not Char then return end
-    
+
+    -- Сначала скрываем все кости, чтобы при смене R15/R6 не оставались старые линии
+    for _, line in pairs(o.Skeleton) do
+        line.Visible = false
+    end
+
     local function GetLimbPos(partName)
         local part = Char:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             local success, pos, onScreen = pcall(function()
-                local p, o = Camera:WorldToViewportPoint(part.Position)
-                return p, o
+                local p, isOnScreen = Camera:WorldToViewportPoint(part.Position)
+                return p, isOnScreen
             end)
+
             if success and onScreen and pos.Z > 0 then
                 return Vector2.new(pos.X, pos.Y), true
             end
         end
+
         return nil, false
     end
-    
+
     -- R15 skeleton map
     local skeletonMapR15 = {
         HeadTorso = {"Head", "UpperTorso"},
@@ -361,7 +589,7 @@ local function DrawSkeleton(Player, o, Col)
         HipRightKnee = {"LowerTorso", "RightUpperLeg"},
         RightKneeFoot = {"RightUpperLeg", "RightLowerLeg"},
     }
-    
+
     -- R6 skeleton map
     local skeletonMapR6 = {
         HeadTorso = {"Head", "Torso"},
@@ -370,17 +598,17 @@ local function DrawSkeleton(Player, o, Col)
         HipLeftKnee = {"Torso", "Left Leg"},
         HipRightKnee = {"Torso", "Right Leg"},
     }
-    
+
     -- Определяем тип рига
     local isR15 = Char:FindFirstChild("UpperTorso") ~= nil
     local currentMap = isR15 and skeletonMapR15 or skeletonMapR6
-    
+
     for lineName, parts in pairs(currentMap) do
         local line = o.Skeleton[lineName]
         if line then
             local pos1, vis1 = GetLimbPos(parts[1])
             local pos2, vis2 = GetLimbPos(parts[2])
-            
+
             if pos1 and pos2 and vis1 and vis2 then
                 line.From = pos1
                 line.To = pos2
@@ -400,24 +628,24 @@ local function DrawAimDirection(Player, o, Col)
         o.AimLine.Visible = false
         return
     end
-    
+
     local Char = Player.Character
-    if not Char then 
+    if not Char then
         o.AimLine.Visible = false
-        return 
+        return
     end
-    
+
     local head = Char:FindFirstChild("Head")
-    if not head or not head:IsA("BasePart") then 
+    if not head or not head:IsA("BasePart") then
         o.AimLine.Visible = false
-        return 
+        return
     end
-    
+
     local success, result = pcall(function()
         local aimEnd = head.Position + head.CFrame.LookVector * Settings.AimLineLength
         local headScreen, headOn = Camera:WorldToViewportPoint(head.Position)
         local aimScreen, aimOn = Camera:WorldToViewportPoint(aimEnd)
-        
+
         if headOn and aimOn and headScreen.Z > 0 and aimScreen.Z > 0 then
             o.AimLine.From = Vector2.new(headScreen.X, headScreen.Y)
             o.AimLine.To = Vector2.new(aimScreen.X, aimScreen.Y)
@@ -425,9 +653,10 @@ local function DrawAimDirection(Player, o, Col)
             o.AimLine.Visible = true
             return true
         end
+
         return false
     end)
-    
+
     if not success or not result then
         o.AimLine.Visible = false
     end
@@ -439,8 +668,14 @@ Players.PlayerRemoving:Connect(RemoveESP)
 
 -- ========== MAIN LOOP ==========
 RunService.RenderStepped:Connect(function()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
     for Player, o in pairs(ESPCache) do
-        if not Settings.Enabled then HideESP(o) continue end
+        if not Settings.Enabled then
+            HideESP(o)
+            continue
+        end
 
         -- Проверка существования игрока
         if not Player or not Player.Parent then
@@ -453,7 +688,7 @@ RunService.RenderStepped:Connect(function()
         local Hum  = Char and Char:FindFirstChildOfClass("Humanoid")
 
         if not (Char and Root and Hum and Hum.Health > 0) then
-            HideESP(o) 
+            HideESP(o)
             continue
         end
 
@@ -462,7 +697,7 @@ RunService.RenderStepped:Connect(function()
             local pos, onScreen = Camera:WorldToViewportPoint(Root.Position)
             return pos, onScreen
         end)
-        
+
         if not success or not OnScreen or SP.Z <= 0 then
             HideESP(o)
             continue
@@ -471,21 +706,30 @@ RunService.RenderStepped:Connect(function()
         local Dist = (Camera.CFrame.Position - Root.Position).Magnitude
 
         if Dist > Settings.MaxDistance then
-            HideESP(o) 
+            HideESP(o)
             continue
         end
-        
+
         if IsTeammate(Player) then
-            HideESP(o) 
+            HideESP(o)
             continue
         end
+
+        -- НОВОЕ: проверка видимости. Видит камера хотя бы одну важную часть игрока = зелёный, иначе красный.
+        local IsVisible = false
+        pcall(function()
+            IsVisible = IsCharacterVisible(Char)
+        end)
 
         local BH  = 4000 / Dist
         local BW  = 2200 / Dist
         local X   = SP.X - BW/2
         local Y   = SP.Y - BH/2
-        local Col = GetColor(Player)
+        local Col = GetColor(Player, IsVisible)
         local V2  = Vector2.new
+
+        -- Chams / Highlight ESP
+        UpdateChams(Player, o, Char, Col)
 
         -- Box ESP
         if Settings.ShowBox then
@@ -494,7 +738,8 @@ RunService.RenderStepped:Connect(function()
             o.BoxLeft.From = V2(X,Y)     ; o.BoxLeft.To = V2(X,Y+BH)
             o.BoxRight.From = V2(X+BW,Y) ; o.BoxRight.To = V2(X+BW,Y+BH)
             for _,k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
-                o[k].Color = Col ; o[k].Visible = true
+                o[k].Color = Col
+                o[k].Visible = true
             end
         else
             for _,k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
@@ -525,11 +770,11 @@ RunService.RenderStepped:Connect(function()
             local pct = math.clamp(Hum.Health / Hum.MaxHealth, 0, 1)
             local barX = X - 6
             local barHeight = BH
-            
+
             o.HpBg.From      = V2(barX, Y)
             o.HpBg.To        = V2(barX, Y + barHeight)
             o.HpBg.Visible   = true
-            
+
             local fillHeight = barHeight * pct
             o.HpFill.From    = V2(barX, Y + barHeight)
             o.HpFill.To      = V2(barX, Y + barHeight - fillHeight)
@@ -539,7 +784,7 @@ RunService.RenderStepped:Connect(function()
             o.HpBg.Visible   = false
             o.HpFill.Visible = false
         end
-        
+
         -- Skeleton ESP
         if Settings.ShowSkeleton then
             pcall(function() DrawSkeleton(Player, o, Col) end)
@@ -548,18 +793,18 @@ RunService.RenderStepped:Connect(function()
                 line.Visible = false
             end
         end
-        
-        -- Направление взгляда (с проверкой включения)
+
+        -- Направление взгляда
         if Settings.ShowAimDir then
             pcall(function() DrawAimDirection(Player, o, Col) end)
         else
             o.AimLine.Visible = false
         end
-        
-        -- Предупреждение "Смотрит на тебя" (с проверкой включения)
+
+        -- Предупреждение "Смотрит на тебя"
         if Settings.ShowLookingAtYou then
-            local success, isLooking = pcall(function() return IsLookingAtYou(Char) end)
-            if success and isLooking then
+            local successLook, isLooking = pcall(function() return IsLookingAtYou(Char) end)
+            if successLook and isLooking then
                 o.LookingText.Text = "[!] СМОТРИТ НА ТЕБЯ"
                 o.LookingText.Position = V2(SP.X, Y - 35)
                 o.LookingText.Visible = true
@@ -572,6 +817,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("✅ Universal ESP Script [ENHANCED v2] loaded | RightShift = menu")
-print("🆕 Новые функции работают ВО ВСЕХ играх! (включите их в Extra Features)")
-print("⚙️ Направление взгляда и 'Смотрит на тебя' можно вкл/выкл")
+print("✅ Universal ESP Script [ENHANCED v3] loaded | RightShift = menu")
+print("🟢 Видимые противники = зелёные | 🔴 Не видимые = красные")
+print("✨ Chams / Highlight ESP добавлены без привязки к PlaceId")
+print("🚫 Rayfield рекламный prompt отключён")

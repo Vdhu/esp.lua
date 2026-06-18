@@ -1,10 +1,11 @@
 --[[
-    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v5
+    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v6
     Работает во ВСЕХ Roblox играх
 
-    Изменения v5:
+    Изменения v6:
+    - ИСПРАВЛЕН краш при загрузке (settings().Rendering обёрнут в pcall)
     - ИСПРАВЛЕН ноуклип (HumanoidRootPart тоже отключает коллизию)
-    - ИСПРАВЛЕНО дублирование ников в TP вкладке (убраны лишние секции)
+    - ИСПРАВЛЕНО дублирование ников в TP вкладке
     - ДОБАВЛЕН FPS Бустер (4 уровня + сброс)
 
     Open Menu: RightShift
@@ -15,10 +16,10 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 local Window = Rayfield:CreateWindow({
-    Name  = "Universal ESP Script [v5]",
+    Name  = "Universal ESP Script [v6]",
     Icon  = 4483362458,
     LoadingTitle    = "Universal ESP Script",
-    LoadingSubtitle = "Loading Enhanced v5...",
+    LoadingSubtitle = "Loading Enhanced v6...",
     DisableRayfieldPrompts = true,
     DisableBuildWarnings = true,
     ConfigurationSaving = {
@@ -38,12 +39,12 @@ local ExtraTab = Window:CreateTab("Extra", 4483362458)
 local InfoTab  = Window:CreateTab("Info", 4483362458)
 
 -- ========== SERVICES ==========
-local Players        = game:GetService("Players")
-local RunService     = game:GetService("RunService")
-local UIS            = game:GetService("UserInputService")
-local Lighting       = game:GetService("Lighting")
-local LP             = Players.LocalPlayer
-local Camera         = workspace.CurrentCamera
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS        = game:GetService("UserInputService")
+local Lighting   = game:GetService("Lighting")
+local LP         = Players.LocalPlayer
+local Camera     = workspace.CurrentCamera
 
 -- ========== SETTINGS ==========
 local Settings = {
@@ -77,85 +78,118 @@ local CheatSettings = {
     SavedPosition = nil,
 }
 
--- ========== FPS BOOST SETTINGS ==========
-local OriginalGraphics = {
-    QualityLevel         = settings().Rendering.QualityLevel,
-    GlobalShadows        = Lighting.GlobalShadows,
-    FogEnd               = Lighting.FogEnd,
-    Brightness           = Lighting.Brightness,
-    ParticlesEnabled     = true,
-    DecalsEnabled        = true,
+-- ========== PALETTE ==========
+local Palette = {
+    HealthHigh   = Color3.fromRGB(0, 255, 0),
+    HealthMid    = Color3.fromRGB(255, 255, 0),
+    HealthLow    = Color3.fromRGB(255, 0, 0),
+    HealthBg     = Color3.fromRGB(40, 40, 40),
+    LookingAtYou = Color3.fromRGB(255, 255, 0),
+    AimDir       = Color3.fromRGB(255, 150, 0),
 }
 
-local FPSBoostActive = 0  -- 0 = none, 1-4 = level
+-- ===================================================
+-- =================== FPS BOOST =====================
+-- ===================================================
+
+-- ИСПРАВЛЕНО: settings().Rendering.QualityLevel вызывал краш при
+-- инициализации таблицы. Теперь всё читается через pcall.
+local OriginalGraphics = {}
 
 local function SaveOriginalGraphics()
-    OriginalGraphics.QualityLevel = settings().Rendering.QualityLevel
-    OriginalGraphics.GlobalShadows = Lighting.GlobalShadows
-    OriginalGraphics.FogEnd = Lighting.FogEnd
-    OriginalGraphics.Brightness = Lighting.Brightness
+    pcall(function()
+        OriginalGraphics.QualityLevel = settings().Rendering.QualityLevel
+    end)
+    pcall(function()
+        OriginalGraphics.GlobalShadows = Lighting.GlobalShadows
+        OriginalGraphics.FogEnd        = Lighting.FogEnd
+        OriginalGraphics.FogStart      = Lighting.FogStart
+        OriginalGraphics.Brightness    = Lighting.Brightness
+    end)
+    OriginalGraphics.Saved = true
 end
 
+-- Сохраняем сразу при загрузке скрипта
+SaveOriginalGraphics()
+
 local function SetParticles(state)
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
-            obj.Enabled = state
+    pcall(function()
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") or obj:IsA("Smoke")
+               or obj:IsA("Fire") or obj:IsA("Sparkles") then
+                pcall(function() obj.Enabled = state end)
+            end
         end
-    end
+    end)
 end
 
 local function SetDecals(state)
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("Decal") or obj:IsA("Texture") then
-            obj.Transparency = state and 0 or 1
+    pcall(function()
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                pcall(function() obj.Transparency = state and 0 or 1 end)
+            end
         end
-    end
+    end)
+end
+
+local function SetQuality(level)
+    pcall(function()
+        settings().Rendering.QualityLevel = level
+    end)
 end
 
 local function ApplyFPSBoost(level)
-    FPSBoostActive = level
     if level == 0 then
-        -- СБРОС
-        pcall(function() settings().Rendering.QualityLevel = OriginalGraphics.QualityLevel end)
-        Lighting.GlobalShadows = OriginalGraphics.GlobalShadows
-        Lighting.FogEnd = OriginalGraphics.FogEnd
-        Lighting.Brightness = OriginalGraphics.Brightness
+        -- СБРОС к оригинальным настройкам
+        pcall(function()
+            if OriginalGraphics.QualityLevel then
+                settings().Rendering.QualityLevel = OriginalGraphics.QualityLevel
+            end
+        end)
+        pcall(function()
+            if OriginalGraphics.GlobalShadows ~= nil then
+                Lighting.GlobalShadows = OriginalGraphics.GlobalShadows
+            end
+            if OriginalGraphics.FogEnd then
+                Lighting.FogEnd = OriginalGraphics.FogEnd
+            end
+            if OriginalGraphics.FogStart then
+                Lighting.FogStart = OriginalGraphics.FogStart
+            end
+            if OriginalGraphics.Brightness then
+                Lighting.Brightness = OriginalGraphics.Brightness
+            end
+        end)
         SetParticles(true)
         SetDecals(true)
         return
     end
 
+    -- Уровень 1: снижение качества рендера, убрать туман
     if level >= 1 then
-        -- Уровень 1: лёгкий буст (качество -2, убрать туман)
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level05 end)
-        Lighting.FogEnd = 100000
+        SetQuality(Enum.QualityLevel.Level05)
+        pcall(function() Lighting.FogEnd = 100000 end)
     end
+
+    -- Уровень 2: минимум качество, тени выкл
     if level >= 2 then
-        -- Уровень 2: средний буст (качество минимум, тени выкл)
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
-        Lighting.GlobalShadows = false
+        SetQuality(Enum.QualityLevel.Level03)
+        pcall(function() Lighting.GlobalShadows = false end)
     end
+
+    -- Уровень 3: убрать частицы
     if level >= 3 then
-        -- Уровень 3: сильный буст (убрать частицы)
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-        Lighting.Brightness = 1
+        SetQuality(Enum.QualityLevel.Level01)
+        pcall(function() Lighting.Brightness = 1 end)
         SetParticles(false)
     end
+
+    -- Уровень 4: убрать декали и текстуры
     if level >= 4 then
-        -- Уровень 4: максимальный буст (убрать декали, яркость)
         SetDecals(false)
     end
 end
-
--- ========== PALETTE ==========
-local Palette = {
-    HealthHigh = Color3.fromRGB(0, 255, 0),
-    HealthMid  = Color3.fromRGB(255, 255, 0),
-    HealthLow  = Color3.fromRGB(255, 0, 0),
-    HealthBg   = Color3.fromRGB(40, 40, 40),
-    LookingAtYou = Color3.fromRGB(255, 255, 0),
-    AimDir = Color3.fromRGB(255, 150, 0),
-}
 
 -- ========== CHAMS FOLDER ==========
 local ChamsFolder = Instance.new("Folder")
@@ -246,14 +280,14 @@ ESPTab:CreateToggle({
 })
 
 ESPTab:CreateToggle({
-    Name = "🎯 Направление взгляда (AIM DIR)",
+    Name = "Направление взгляда (AIM DIR)",
     CurrentValue = Settings.ShowAimDir,
     Flag = "AimDir",
     Callback = function(v) Settings.ShowAimDir = v end,
 })
 
 ESPTab:CreateToggle({
-    Name = "👁️ Предупреждение 'Смотрит на тебя'",
+    Name = "Предупреждение 'Смотрит на тебя'",
     CurrentValue = Settings.ShowLookingAtYou,
     Flag = "LookingAtYou",
     Callback = function(v) Settings.ShowLookingAtYou = v end,
@@ -300,7 +334,8 @@ ESPTab:CreateSlider({
 -- ===================================================
 -- ================ TELEPORT TAB =====================
 -- ===================================================
--- ИСПРАВЛЕНО: убрана лишняя секция заголовка, ники не дублируются
+-- ИСПРАВЛЕНО: убрана TPTab:CreateSection над кнопками TP
+-- из-за которой ники показывались дважды
 
 local tpButtonsCache = {}
 
@@ -310,25 +345,27 @@ local function RefreshPlayerButtons()
     end
     tpButtonsCache = {}
 
+    local found = false
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LP then
+            found = true
             local btn = TPTab:CreateButton({
-                Name = "🌀 ТП к: " .. player.Name,
+                Name = "ТП к: " .. player.Name,
                 Callback = function()
-                    local char = LP.Character
-                    local root = char and char:FindFirstChild("HumanoidRootPart")
+                    local char  = LP.Character
+                    local root  = char and char:FindFirstChild("HumanoidRootPart")
                     local tChar = player.Character
                     local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
                     if root and tRoot then
                         root.CFrame = tRoot.CFrame + Vector3.new(0, 3, 0)
                         Rayfield:Notify({
-                            Title = "Телепорт",
+                            Title   = "Телепорт",
                             Content = "ТП к " .. player.Name .. " выполнен!",
                             Duration = 3,
                         })
                     else
                         Rayfield:Notify({
-                            Title = "Ошибка",
+                            Title   = "Ошибка",
                             Content = "Игрок " .. player.Name .. " не имеет персонажа.",
                             Duration = 3,
                         })
@@ -339,18 +376,18 @@ local function RefreshPlayerButtons()
         end
     end
 
-    if #tpButtonsCache == 0 then
+    if not found then
         local stub = TPTab:CreateLabel("— Нет других игроков на сервере —")
         table.insert(tpButtonsCache, stub)
     end
 end
 
 TPTab:CreateButton({
-    Name = "🔄 Обновить список игроков",
+    Name = "Обновить список игроков",
     Callback = function()
         RefreshPlayerButtons()
         Rayfield:Notify({
-            Title = "Список обновлён",
+            Title   = "Список обновлён",
             Content = "Список игроков обновлён.",
             Duration = 2,
         })
@@ -358,27 +395,26 @@ TPTab:CreateButton({
 })
 
 RefreshPlayerButtons()
-
 Players.PlayerAdded:Connect(function() RefreshPlayerButtons() end)
 Players.PlayerRemoving:Connect(function() RefreshPlayerButtons() end)
 
 TPTab:CreateDivider()
 
 TPTab:CreateButton({
-    Name = "📍 Сохранить текущее место",
+    Name = "Сохранить текущее место",
     Callback = function()
         local char = LP.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
             CheatSettings.SavedPosition = root.CFrame
             Rayfield:Notify({
-                Title = "📍 Место сохранено",
+                Title   = "Место сохранено",
                 Content = "Позиция сохранена! Используй 'ТП на сохранённое место'.",
                 Duration = 3,
             })
         else
             Rayfield:Notify({
-                Title = "Ошибка",
+                Title   = "Ошибка",
                 Content = "Персонаж не найден.",
                 Duration = 3,
             })
@@ -387,11 +423,11 @@ TPTab:CreateButton({
 })
 
 TPTab:CreateButton({
-    Name = "🔙 ТП на сохранённое место",
+    Name = "ТП на сохранённое место",
     Callback = function()
         if not CheatSettings.SavedPosition then
             Rayfield:Notify({
-                Title = "Ошибка",
+                Title   = "Ошибка",
                 Content = "Сначала сохрани место кнопкой выше!",
                 Duration = 3,
             })
@@ -402,13 +438,13 @@ TPTab:CreateButton({
         if root then
             root.CFrame = CheatSettings.SavedPosition
             Rayfield:Notify({
-                Title = "🔙 Телепортировано",
+                Title   = "Телепортировано",
                 Content = "Вернулся на сохранённое место!",
                 Duration = 3,
             })
         else
             Rayfield:Notify({
-                Title = "Ошибка",
+                Title   = "Ошибка",
                 Content = "Персонаж не найден.",
                 Duration = 3,
             })
@@ -423,40 +459,40 @@ TPTab:CreateButton({
 CheatTab:CreateSection("Движение")
 
 CheatTab:CreateToggle({
-    Name = "🐇 Бесконечный прыжок",
+    Name = "Бесконечный прыжок",
     CurrentValue = CheatSettings.InfiniteJump,
     Flag = "InfiniteJump",
     Callback = function(v)
         CheatSettings.InfiniteJump = v
         Rayfield:Notify({
-            Title = "Бесконечный прыжок",
-            Content = v and "ВКЛЮЧЁН ✅" or "ВЫКЛЮЧЕН ❌",
+            Title   = "Бесконечный прыжок",
+            Content = v and "ВКЛЮЧЁН" or "ВЫКЛЮЧЕН",
             Duration = 2,
         })
     end,
 })
 
 CheatTab:CreateToggle({
-    Name = "⚡ СПИДхак (SpeedHack)",
+    Name = "СПИДхак (SpeedHack)",
     CurrentValue = CheatSettings.SpeedEnabled,
     Flag = "SpeedEnabled",
     Callback = function(v)
         CheatSettings.SpeedEnabled = v
         local char = LP.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
             hum.WalkSpeed = v and CheatSettings.SpeedValue or 16
         end
         Rayfield:Notify({
-            Title = "СПИДхак",
-            Content = v and ("ВКЛЮЧЁН ✅ | Скорость: " .. CheatSettings.SpeedValue) or "ВЫКЛЮЧЕН ❌ | Скорость сброшена",
+            Title   = "СПИДхак",
+            Content = v and ("ВКЛЮЧЁН | Скорость: " .. CheatSettings.SpeedValue) or "ВЫКЛЮЧЕН",
             Duration = 2,
         })
     end,
 })
 
 CheatTab:CreateSlider({
-    Name = "⚡ Скорость (WalkSpeed)",
+    Name = "Скорость (WalkSpeed)",
     Range = {16, 300},
     Increment = 1,
     Suffix = " sp",
@@ -466,7 +502,7 @@ CheatTab:CreateSlider({
         CheatSettings.SpeedValue = tonumber(v) or 16
         if CheatSettings.SpeedEnabled then
             local char = LP.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
             if hum then
                 hum.WalkSpeed = CheatSettings.SpeedValue
             end
@@ -477,131 +513,87 @@ CheatTab:CreateSlider({
 CheatTab:CreateDivider()
 CheatTab:CreateSection("Коллизии")
 
--- ========== ИСПРАВЛЕННЫЙ НОУКЛИП ==========
--- Проблема была: HumanoidRootPart исключался из CanCollide=false,
--- а именно он является основным collider'ом персонажа.
--- Исправление: отключаем CanCollide у ВСЕХ BasePart включая HRP,
--- но для этого используем Humanoid StateType чтобы не падал через пол.
-
+-- ИСПРАВЛЕННЫЙ НОУКЛИП
+-- v5 ошибка: HumanoidRootPart исключался (part.Name ~= "HumanoidRootPart"),
+-- но HRP — это основной физический коллайдер персонажа.
+-- Теперь CanCollide = false применяется ко ВСЕМ BasePart.
 CheatTab:CreateToggle({
-    Name = "👻 Ноуклип (Noclip)",
+    Name = "Ноуклип (Noclip)",
     CurrentValue = CheatSettings.Noclip,
     Flag = "Noclip",
     Callback = function(v)
         CheatSettings.Noclip = v
         if not v then
+            -- При выключении — сразу вернуть коллизии
             local char = LP.Character
             if char then
                 for _, part in pairs(char:GetDescendants()) do
                     if part:IsA("BasePart") then
-                        part.CanCollide = true
+                        pcall(function() part.CanCollide = true end)
                     end
                 end
             end
         end
         Rayfield:Notify({
-            Title = "Ноуклип",
-            Content = v and "ВКЛЮЧЁН ✅ — проходишь сквозь стены!" or "ВЫКЛЮЧЕН ❌ — коллизии восстановлены",
+            Title   = "Ноуклип",
+            Content = v and "ВКЛЮЧЁН — проходишь сквозь стены!" or "ВЫКЛЮЧЕН — коллизии восстановлены",
             Duration = 2,
         })
     end,
 })
-
--- ========== INFINITE JUMP LOGIC ==========
-UIS.JumpRequest:Connect(function()
-    if CheatSettings.InfiniteJump then
-        local char = LP.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-    end
-end)
-
--- ========== ИСПРАВЛЕННЫЙ NOCLIP LOOP ==========
--- Ключевое исправление: отключаем CanCollide у ВСЕХ BasePart (включая HumanoidRootPart)
-RunService.Stepped:Connect(function()
-    if CheatSettings.Noclip then
-        local char = LP.Character
-        if char then
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
-            -- Дополнительно сбрасываем физическое состояние гуманоида
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
-                hum:ChangeState(Enum.HumanoidStateType.Running)
-            end
-        end
-    end
-end)
-
--- Восстанавливаем скорость при респавне
-LP.CharacterAdded:Connect(function(char)
-    local hum = char:WaitForChild("Humanoid")
-    if CheatSettings.SpeedEnabled then
-        hum.WalkSpeed = CheatSettings.SpeedValue
-    end
-    -- Сохраняем оригинальную графику при первом спавне
-    SaveOriginalGraphics()
-end)
 
 -- ===================================================
 -- ================== FPS BOOST TAB ==================
 -- ===================================================
 
 FPSTab:CreateParagraph({
-    Title = "🚀 FPS Бустер",
-    Content = "Выбери уровень буста FPS. Каждый следующий уровень сильнее снижает графику, но даёт больше FPS. Кнопка 'Сброс' вернёт все настройки графики в исходное состояние.",
+    Title   = "FPS Бустер",
+    Content = "Выбери уровень буста FPS. Чем выше уровень — тем сильнее снижается графика и больше FPS. Кнопка Сброс возвращает всё к оригиналу.",
 })
 
-FPSTab:CreateDivider()
-
 FPSTab:CreateButton({
-    Name = "⚡ Уровень 1 — Лёгкий буст",
+    Name = "Уровень 1 — Лёгкий буст",
     Callback = function()
         ApplyFPSBoost(1)
         Rayfield:Notify({
-            Title = "FPS Буст — Уровень 1",
-            Content = "✅ Лёгкий буст применён: качество -2 ступени, туман отключён",
+            Title   = "FPS Буст — Уровень 1",
+            Content = "Лёгкий: качество снижено, туман отключён",
             Duration = 3,
         })
     end,
 })
 
 FPSTab:CreateButton({
-    Name = "🔥 Уровень 2 — Средний буст",
+    Name = "Уровень 2 — Средний буст",
     Callback = function()
         ApplyFPSBoost(2)
         Rayfield:Notify({
-            Title = "FPS Буст — Уровень 2",
-            Content = "✅ Средний буст: минимальное качество + тени выключены",
+            Title   = "FPS Буст — Уровень 2",
+            Content = "Средний: мин. качество + глобальные тени выключены",
             Duration = 3,
         })
     end,
 })
 
 FPSTab:CreateButton({
-    Name = "💀 Уровень 3 — Сильный буст",
+    Name = "Уровень 3 — Сильный буст",
     Callback = function()
         ApplyFPSBoost(3)
         Rayfield:Notify({
-            Title = "FPS Буст — Уровень 3",
-            Content = "✅ Сильный буст: минимум графики + частицы/эффекты выключены",
+            Title   = "FPS Буст — Уровень 3",
+            Content = "Сильный: + частицы, огонь, дым отключены",
             Duration = 3,
         })
     end,
 })
 
 FPSTab:CreateButton({
-    Name = "☢️ Уровень 4 — МАКСИМАЛЬНЫЙ буст",
+    Name = "Уровень 4 — МАКСИМАЛЬНЫЙ буст",
     Callback = function()
         ApplyFPSBoost(4)
         Rayfield:Notify({
-            Title = "FPS Буст — Уровень 4",
-            Content = "✅ МАКСИМАЛЬНЫЙ буст: всё выключено, максимум FPS!",
+            Title   = "FPS Буст — Уровень 4",
+            Content = "МАКСИМУМ: + все текстуры и декали скрыты",
             Duration = 3,
         })
     end,
@@ -610,35 +602,24 @@ FPSTab:CreateButton({
 FPSTab:CreateDivider()
 
 FPSTab:CreateButton({
-    Name = "🔄 Сбросить графику (Restore)",
+    Name = "Сбросить графику (Restore)",
     Callback = function()
         ApplyFPSBoost(0)
         Rayfield:Notify({
-            Title = "Графика восстановлена",
-            Content = "✅ Все настройки графики возвращены в исходное состояние!",
+            Title   = "Графика восстановлена",
+            Content = "Все настройки графики возвращены к оригиналу!",
             Duration = 3,
         })
     end,
 })
 
-FPSTab:CreateParagraph({
-    Title = "📋 Описание уровней",
-    Content = "⚡ Уровень 1: Снижение качества рендера, отключение тумана
-
-🔥 Уровень 2: Мин. качество + отключение глобальных теней
-
-💀 Уровень 3: Всё из Ур.2 + отключение частиц/огня/дыма
-
-☢️ Уровень 4: Всё из Ур.3 + скрытие текстур/декалей
-
-🔄 Сброс: Возврат к исходным настройкам графики",
-})
-
--- ========== EXTRA TAB (ESP дополнения) ==========
+-- ===================================================
+-- =================== EXTRA TAB =====================
+-- ===================================================
 
 ExtraTab:CreateParagraph({
-    Title = "Extra ESP опции",
-    Content = "Дополнительные параметры ESP — перенесены из старой вкладки Extra.",
+    Title   = "Extra ESP опции",
+    Content = "Дополнительные параметры ESP.",
 })
 
 ExtraTab:CreateSlider({
@@ -665,36 +646,27 @@ ExtraTab:CreateSlider({
     end,
 })
 
--- ========== INFO TAB ==========
+-- ===================================================
+-- ==================== INFO TAB =====================
+-- ===================================================
 
 InfoTab:CreateParagraph({
-    Title = "Universal ESP Script [v5]",
-    Content = "🔧 ИСПРАВЛЕНО в v5:
-• Ноуклип — теперь работает корректно (HRP тоже получает CanCollide=false)
-• Телепорты — ники игроков больше не дублируются
+    Title   = "Universal ESP Script [v6]",
+    Content = "ИСПРАВЛЕНО в v6:
+• Краш при загрузке — settings().Rendering теперь в pcall
+• Ноуклип — HRP тоже получает CanCollide=false
+• TP вкладка — ники больше не дублируются
 
-🆕 ДОБАВЛЕНО в v5:
-• FPS Бустер (4 уровня + сброс графики)
+ДОБАВЛЕНО:
+• FPS Буст (4 уровня + сброс)
 
-📌 ESP ФУНКЦИИ:
-• Box ESP
-• Chams/Highlight ESP
-• Skeleton ESP
-• Tracers
+ESP ФУНКЦИИ:
+• Box, Chams, Skeleton, Tracers
 • Имя, HP, Дистанция
-• Зелёный = виден, Красный = за стеной
+• Зелёный=виден, Красный=за стеной
 • Team Check
 
-⚙️ ЧИТЫ:
-• Бесконечный прыжок
-• СПИДхак с ползунком
-• Ноуклип
-
-🚀 FPS БУСТ:
-• 4 уровня снижения графики
-• Кнопка сброса к оригиналу
-
-⌨️ УПРАВЛЕНИЕ:
+УПРАВЛЕНИЕ:
 • RightShift — открыть/закрыть меню"
 })
 
@@ -751,8 +723,8 @@ end
 
 local function IsPartVisibleToCamera(part, targetChar)
     if not Camera or not part or not part:IsA("BasePart") or not targetChar then return false end
-    local origin = Camera.CFrame.Position
-    local target = part.Position
+    local origin    = Camera.CFrame.Position
+    local target    = part.Position
     local direction = target - origin
     if direction.Magnitude <= 0.1 then return true end
     local ignoreList = {}
@@ -797,7 +769,7 @@ end
 local function IsLookingAtYou(char)
     if not LP.Character then return false end
     local myHead = LP.Character:FindFirstChild("Head") or LP.Character:FindFirstChild("HumanoidRootPart")
-    local head = char:FindFirstChild("Head")
+    local head   = char:FindFirstChild("Head")
     if not myHead or not head then return false end
     local ok, res = pcall(function()
         return ((myHead.Position - head.Position).Unit):Dot(head.CFrame.LookVector) > 0.85
@@ -811,30 +783,30 @@ local ESPCache = {}
 
 local function NewLine(thickness, transp)
     local l = Drawing.new("Line")
-    l.Thickness = thickness or 1.5
+    l.Thickness    = thickness or 1.5
     l.Transparency = transp or 0.7
-    l.Visible = false
+    l.Visible      = false
     return l
 end
 
 local function NewText(size)
     local t = Drawing.new("Text")
-    t.Size = size or 12
-    t.Center = true
+    t.Size    = size or 12
+    t.Center  = true
     t.Outline = true
-    t.Font = 2
+    t.Font    = 2
     t.Visible = false
     return t
 end
 
 local function NewChams()
     local h = Instance.new("Highlight")
-    h.Name = "UniversalESP_Chams"
-    h.Enabled = false
-    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    h.FillTransparency = Settings.ChamsFillTransparency
-    h.OutlineTransparency = Settings.ChamsOutlineTransparency
-    h.Parent = ChamsFolder
+    h.Name                  = "UniversalESP_Chams"
+    h.Enabled               = false
+    h.DepthMode             = Enum.HighlightDepthMode.AlwaysOnTop
+    h.FillTransparency      = Settings.ChamsFillTransparency
+    h.OutlineTransparency   = Settings.ChamsOutlineTransparency
+    h.Parent                = ChamsFolder
     return h
 end
 
@@ -856,20 +828,20 @@ local function CreateESP(Player)
         RightKneeFoot      = NewLine(Settings.SkeletonThickness, 0.8),
     }
     ESPCache[Player] = {
-        BoxTop  = NewLine(), BoxBot  = NewLine(),
-        BoxLeft = NewLine(), BoxRight = NewLine(),
-        Tracer  = NewLine(1, 0.8),
-        Name    = NewText(12),
-        Distance = NewText(10),
-        HpBg    = NewLine(4, 1),
-        HpFill  = NewLine(4, 1),
-        Skeleton = Skel,
-        AimLine  = NewLine(2, 0.9),
+        BoxTop      = NewLine(), BoxBot      = NewLine(),
+        BoxLeft     = NewLine(), BoxRight    = NewLine(),
+        Tracer      = NewLine(1, 0.8),
+        Name        = NewText(12),
+        Distance    = NewText(10),
+        HpBg        = NewLine(4, 1),
+        HpFill      = NewLine(4, 1),
+        Skeleton    = Skel,
+        AimLine     = NewLine(2, 0.9),
         LookingText = NewText(13),
-        Chams = NewChams(),
+        Chams       = NewChams(),
     }
-    ESPCache[Player].HpBg.Color = Palette.HealthBg
-    ESPCache[Player].Distance.Font = 1
+    ESPCache[Player].HpBg.Color       = Palette.HealthBg
+    ESPCache[Player].Distance.Font    = 1
     ESPCache[Player].LookingText.Color = Palette.LookingAtYou
 end
 
@@ -900,11 +872,11 @@ local function UpdateChams(Player, o, Char, Col)
     if not o.Chams then return end
     if Settings.ShowChams and Char then
         if o.Chams.Adornee ~= Char then o.Chams.Adornee = Char end
-        o.Chams.FillColor = Col
-        o.Chams.OutlineColor = Col
-        o.Chams.FillTransparency = Settings.ChamsFillTransparency
-        o.Chams.OutlineTransparency = Settings.ChamsOutlineTransparency
-        o.Chams.Enabled = true
+        o.Chams.FillColor            = Col
+        o.Chams.OutlineColor         = Col
+        o.Chams.FillTransparency     = Settings.ChamsFillTransparency
+        o.Chams.OutlineTransparency  = Settings.ChamsOutlineTransparency
+        o.Chams.Enabled              = true
     else
         o.Chams.Enabled = false
     end
@@ -927,18 +899,26 @@ local function DrawSkeleton(Player, o, Col)
         end
         return nil, false
     end
-    local isR15 = Char:FindFirstChild("UpperTorso") ~= nil
+    local isR15  = Char:FindFirstChild("UpperTorso") ~= nil
     local skelMap = isR15 and {
-        HeadTorso={"Head","UpperTorso"},TorsoHip={"UpperTorso","LowerTorso"},
-        TorsoLeftShoulder={"UpperTorso","LeftUpperArm"},LeftShoulderElbow={"LeftUpperArm","LeftLowerArm"},
-        LeftElbowHand={"LeftLowerArm","LeftHand"},TorsoRightShoulder={"UpperTorso","RightUpperArm"},
-        RightShoulderElbow={"RightUpperArm","RightLowerArm"},RightElbowHand={"RightLowerArm","RightHand"},
-        HipLeftKnee={"LowerTorso","LeftUpperLeg"},LeftKneeFoot={"LeftUpperLeg","LeftLowerLeg"},
-        HipRightKnee={"LowerTorso","RightUpperLeg"},RightKneeFoot={"RightUpperLeg","RightLowerLeg"},
+        HeadTorso          = {"Head","UpperTorso"},
+        TorsoHip           = {"UpperTorso","LowerTorso"},
+        TorsoLeftShoulder  = {"UpperTorso","LeftUpperArm"},
+        LeftShoulderElbow  = {"LeftUpperArm","LeftLowerArm"},
+        LeftElbowHand      = {"LeftLowerArm","LeftHand"},
+        TorsoRightShoulder = {"UpperTorso","RightUpperArm"},
+        RightShoulderElbow = {"RightUpperArm","RightLowerArm"},
+        RightElbowHand     = {"RightLowerArm","RightHand"},
+        HipLeftKnee        = {"LowerTorso","LeftUpperLeg"},
+        LeftKneeFoot       = {"LeftUpperLeg","LeftLowerLeg"},
+        HipRightKnee       = {"LowerTorso","RightUpperLeg"},
+        RightKneeFoot      = {"RightUpperLeg","RightLowerLeg"},
     } or {
-        HeadTorso={"Head","Torso"},TorsoLeftShoulder={"Torso","Left Arm"},
-        TorsoRightShoulder={"Torso","Right Arm"},HipLeftKnee={"Torso","Left Leg"},
-        HipRightKnee={"Torso","Right Leg"},
+        HeadTorso          = {"Head","Torso"},
+        TorsoLeftShoulder  = {"Torso","Left Arm"},
+        TorsoRightShoulder = {"Torso","Right Arm"},
+        HipLeftKnee        = {"Torso","Left Leg"},
+        HipRightKnee       = {"Torso","Right Leg"},
     }
     for lineName, parts in pairs(skelMap) do
         local line = o.Skeleton[lineName]
@@ -946,10 +926,11 @@ local function DrawSkeleton(Player, o, Col)
             local p1, v1 = GetLimbPos(parts[1])
             local p2, v2 = GetLimbPos(parts[2])
             if p1 and p2 and v1 and v2 then
-                line.From = p1 ; line.To = p2
-                line.Color = Col
+                line.From      = p1
+                line.To        = p2
+                line.Color     = Col
                 line.Thickness = Settings.SkeletonThickness
-                line.Visible = true
+                line.Visible   = true
             end
         end
     end
@@ -962,12 +943,12 @@ local function DrawAimDirection(Player, o, Col)
     local head = Char:FindFirstChild("Head")
     if not head or not head:IsA("BasePart") then o.AimLine.Visible = false ; return end
     local ok, res = pcall(function()
-        local aimEnd = head.Position + head.CFrame.LookVector * Settings.AimLineLength
-        local hS, hOn = Camera:WorldToViewportPoint(head.Position)
-        local aS, aOn = Camera:WorldToViewportPoint(aimEnd)
+        local aimEnd   = head.Position + head.CFrame.LookVector * Settings.AimLineLength
+        local hS, hOn  = Camera:WorldToViewportPoint(head.Position)
+        local aS, aOn  = Camera:WorldToViewportPoint(aimEnd)
         if hOn and aOn and hS.Z > 0 and aS.Z > 0 then
-            o.AimLine.From = Vector2.new(hS.X, hS.Y)
-            o.AimLine.To   = Vector2.new(aS.X, aS.Y)
+            o.AimLine.From  = Vector2.new(hS.X, hS.Y)
+            o.AimLine.To    = Vector2.new(aS.X, aS.Y)
             o.AimLine.Color = Palette.AimDir
             o.AimLine.Visible = true
             return true
@@ -982,6 +963,41 @@ end
 for _, p in pairs(Players:GetPlayers()) do CreateESP(p) end
 Players.PlayerAdded:Connect(CreateESP)
 Players.PlayerRemoving:Connect(RemoveESP)
+
+-- ========== NOCLIP + CHARACTER EVENTS ==========
+
+-- ИСПРАВЛЕННЫЙ НОУКЛИП: отключаем CanCollide у ВСЕХ BasePart (включая HRP)
+RunService.Stepped:Connect(function()
+    if CheatSettings.Noclip then
+        local char = LP.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function() part.CanCollide = false end)
+                end
+            end
+        end
+    end
+end)
+
+-- Бесконечный прыжок
+UIS.JumpRequest:Connect(function()
+    if CheatSettings.InfiniteJump then
+        local char = LP.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- Восстанавливаем скорость при респавне
+LP.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid")
+    if CheatSettings.SpeedEnabled then
+        hum.WalkSpeed = CheatSettings.SpeedValue
+    end
+end)
 
 -- ========== MAIN ESP LOOP ==========
 
@@ -1016,75 +1032,83 @@ RunService.RenderStepped:Connect(function()
 
         local BH  = 4000 / Dist
         local BW  = 2200 / Dist
-        local X   = SP.X - BW/2
-        local Y   = SP.Y - BH/2
+        local X   = SP.X - BW / 2
+        local Y   = SP.Y - BH / 2
         local Col = GetColor(Player, IsVisible)
         local V2  = Vector2.new
 
         UpdateChams(Player, o, Char, Col)
 
         if Settings.ShowBox then
-            o.BoxTop.From=V2(X,Y);o.BoxTop.To=V2(X+BW,Y)
-            o.BoxBot.From=V2(X,Y+BH);o.BoxBot.To=V2(X+BW,Y+BH)
-            o.BoxLeft.From=V2(X,Y);o.BoxLeft.To=V2(X,Y+BH)
-            o.BoxRight.From=V2(X+BW,Y);o.BoxRight.To=V2(X+BW,Y+BH)
-            for _,k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
-                o[k].Color=Col ; o[k].Visible=true
+            o.BoxTop.From  = V2(X, Y)      ; o.BoxTop.To    = V2(X+BW, Y)
+            o.BoxBot.From  = V2(X, Y+BH)   ; o.BoxBot.To    = V2(X+BW, Y+BH)
+            o.BoxLeft.From = V2(X, Y)      ; o.BoxLeft.To   = V2(X, Y+BH)
+            o.BoxRight.From= V2(X+BW, Y)   ; o.BoxRight.To  = V2(X+BW, Y+BH)
+            for _, k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
+                o[k].Color = Col ; o[k].Visible = true
             end
         else
-            for _,k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
-                o[k].Visible=false
+            for _, k in pairs({"BoxTop","BoxBot","BoxLeft","BoxRight"}) do
+                o[k].Visible = false
             end
         end
 
-        o.Tracer.From=V2(Camera.ViewportSize.X/2,Camera.ViewportSize.Y)
-        o.Tracer.To=V2(SP.X,SP.Y)
-        o.Tracer.Color=Col ; o.Tracer.Visible=Settings.ShowTracer
+        o.Tracer.From    = V2(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+        o.Tracer.To      = V2(SP.X, SP.Y)
+        o.Tracer.Color   = Col
+        o.Tracer.Visible = Settings.ShowTracer
 
-        o.Name.Text=Player.Name ; o.Name.Position=V2(SP.X,Y-15)
-        o.Name.Color=Col ; o.Name.Visible=Settings.ShowName
+        o.Name.Text     = Player.Name
+        o.Name.Position = V2(SP.X, Y - 15)
+        o.Name.Color    = Col
+        o.Name.Visible  = Settings.ShowName
 
-        o.Distance.Text=math.floor(Dist).."m"
-        o.Distance.Position=V2(SP.X,Y+BH+4)
-        o.Distance.Color=Color3.fromRGB(200,200,200)
-        o.Distance.Visible=Settings.ShowDistance
+        o.Distance.Text     = math.floor(Dist) .. "m"
+        o.Distance.Position = V2(SP.X, Y + BH + 4)
+        o.Distance.Color    = Color3.fromRGB(200, 200, 200)
+        o.Distance.Visible  = Settings.ShowDistance
 
         if Settings.ShowHealth then
-            local pct = math.clamp(Hum.Health/Hum.MaxHealth,0,1)
-            local bX = X-6
-            o.HpBg.From=V2(bX,Y) ; o.HpBg.To=V2(bX,Y+BH) ; o.HpBg.Visible=true
-            o.HpFill.From=V2(bX,Y+BH) ; o.HpFill.To=V2(bX,Y+BH-BH*pct)
-            o.HpFill.Color=GetHealthColor(Hum.Health,Hum.MaxHealth) ; o.HpFill.Visible=true
+            local pct = math.clamp(Hum.Health / Hum.MaxHealth, 0, 1)
+            local bX  = X - 6
+            o.HpBg.From    = V2(bX, Y)
+            o.HpBg.To      = V2(bX, Y + BH)
+            o.HpBg.Visible = true
+            o.HpFill.From    = V2(bX, Y + BH)
+            o.HpFill.To      = V2(bX, Y + BH - BH * pct)
+            o.HpFill.Color   = GetHealthColor(Hum.Health, Hum.MaxHealth)
+            o.HpFill.Visible = true
         else
-            o.HpBg.Visible=false ; o.HpFill.Visible=false
+            o.HpBg.Visible   = false
+            o.HpFill.Visible = false
         end
 
         if Settings.ShowSkeleton then
-            pcall(function() DrawSkeleton(Player,o,Col) end)
+            pcall(function() DrawSkeleton(Player, o, Col) end)
         else
-            for _,line in pairs(o.Skeleton) do line.Visible=false end
+            for _, line in pairs(o.Skeleton) do line.Visible = false end
         end
 
         if Settings.ShowAimDir then
-            pcall(function() DrawAimDirection(Player,o,Col) end)
+            pcall(function() DrawAimDirection(Player, o, Col) end)
         else
-            o.AimLine.Visible=false
+            o.AimLine.Visible = false
         end
 
         if Settings.ShowLookingAtYou then
             local okL, isLooking = pcall(function() return IsLookingAtYou(Char) end)
             if okL and isLooking then
-                o.LookingText.Text="[!] СМОТРИТ НА ТЕБЯ"
-                o.LookingText.Position=V2(SP.X,Y-35)
-                o.LookingText.Visible=true
+                o.LookingText.Text     = "[!] СМОТРИТ НА ТЕБЯ"
+                o.LookingText.Position = V2(SP.X, Y - 35)
+                o.LookingText.Visible  = true
             else
-                o.LookingText.Visible=false
+                o.LookingText.Visible = false
             end
         else
-            o.LookingText.Visible=false
+            o.LookingText.Visible = false
         end
     end
 end)
 
-print("✅ Universal ESP v5 loaded | RightShift = menu")
-print("🐇 Бесконечный прыжок | ⚡ SpeedHack | 👻 Noclip | 🌀 TP | 🚀 FPS Boost")
+print("Universal ESP v6 loaded | RightShift = menu")
+print("InfiniteJump | SpeedHack | Noclip | TP | FPS Boost")

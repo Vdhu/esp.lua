@@ -28,7 +28,59 @@ local Window = OrionLib:MakeWindow({
     IntroIcon = "rbxassetid://4483362458",
     -- Открывать/закрывать на RightShift
     ToggleKey = Enum.KeyCode.RightShift,
-})
+}}
+
+--[[ 📱 ТОЛЬКО КОД МОБИЛЬНОЙ КНОПКИ Вставьте ПОСЛЕ загрузки OrionLib и создания Window. Кнопка появляется справа по центру экрана. Поддерживает перетаскивание ручки ]] 
+
+local  function  CreateMobileButton ()
+     local  playerGui = LP:WaitForChild( "PlayerGui" )
+
+     local  old = playerGui:FindFirstChild( "ESP_MobileButton" )
+     if old then old:Destroy() конец 
+
+    локального  ScreenGui = Instance.new( "ScreenGui" ) ScreenGui.Name = "ESP_MobileButton" 
+    ScreenGui.ResetOnSpawn = false 
+    ScreenGui.IgnoreGuiInset = true 
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling ScreenGui.Parent = playerGui
+
+     local  Btn = Instance.new( "TextButton" ) Размер Btn = UDim2.new( 0 , 72 , 0 , 72 ) Btn.Position = UDim2.new( 1 , -84 , 0.5 , -36 ) Btn.BackgroundColor3 = Color3.fromRGB( 88 , 44 , 180 ) Btn.Text = "☰\nESP" 
+    Btn.TextColor3 = Color3.fromRGB( 255 , 255 , 255 ) Btn.TextSize = 14 
+    Btn.Font = Enum.Font.GothamBold Btn.ZIndex = 999 
+    Btn.Parent = ScreenGui Instance.new( "UICorner" , Btn).CornerRadius = UDim.new( 0 , 16 )
+     local  Stroke = Instance.new( "UIStroke" , Btn) Stroke.Color = Color3.fromRGB( 180 , 120 , 255 ) Stroke.Thickness = 2 
+
+    local  menuOpen = false 
+    Btn.MouseButton1Click:Connect( function () menuOpen = not menuOpen Btn.BackgroundColor3 = menuOpen
+             and Color3.fromRGB( 50 , 180 , 100 )
+             or   Color3.fromRGB( 88 , 44 , 180 ) Btn.Text = menuOpen and  "✕\nESP"  or  "☰\nESP" 
+        pcall (function () OrionLib.Window:Toggle() end )
+     end )
+
+     -- Перетаскивание 
+    local  dragging , dragStart, startPos = false 
+    Btn.InputBegan:Connect( function (inp)
+         if inp.UserInputType == Enum.UserInputType.Touch then 
+            dragging = true ; dragStart = inp.Position ; startPos = Btn.Position
+         end 
+    end ) Btn.InputChanged:Connect( function (inp)
+         if dragging and inp.UserInputType == Enum.UserInputType.Touch then 
+            local  d = inp.Position - dragStart
+             if d.Magnitude > 10  then 
+                Btn.Position = UDim2.new( startPos.X.Scale, startPos.X.Offset + dX, startPos.Y.Scale, startPos.Y.Offset + dY)
+             end 
+        end 
+    end ) Btn.InputEnded:Connect( function (inp)
+         if inp.UserInputType == Enum.UserInputType.Touch then 
+            dragging = false 
+        end 
+    end )
+ end 
+
+CreateMobileButton()
+
+ -- Пересоздаём кнопку при респавне 
+LP.CharacterAdded:Connect( function () task.wait( 1 ) CreateMobileButton()
+ end )
 
 -- ========== ВКЛАДКИ ==========
 local ESPTab   = Window:MakeTab({ Name = "ESP",       Icon = "rbxassetid://4483362458", PremiumOnly = false })

@@ -1,14 +1,11 @@
 --[[
-    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v4
+    Universal ESP Script - УЛУЧШЕННАЯ ВЕРСИЯ v5
     Работает во ВСЕХ Roblox играх
 
-    Изменения v4:
-    - ИСПРАВЛЕНЫ ползунки (слайдеры) ESP и Extra разделов
-    - Добавлено ТП к игрокам (список выбора)
-    - Добавлено сохранение позиции + ТП на сохранённое место
-    - Бесконечный прыжок
-    - СПИДхак (слайдер скорости)
-    - Ноуклип (проходить сквозь стены)
+    Изменения v5:
+    - ИСПРАВЛЕН ноуклип (HumanoidRootPart тоже отключает коллизию)
+    - ИСПРАВЛЕНО дублирование ников в TP вкладке (убраны лишние секции)
+    - ДОБАВЛЕН FPS Бустер (4 уровня + сброс)
 
     Open Menu: RightShift
 ]]
@@ -18,10 +15,10 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 local Window = Rayfield:CreateWindow({
-    Name  = "Universal ESP Script [v4]",
+    Name  = "Universal ESP Script [v5]",
     Icon  = 4483362458,
     LoadingTitle    = "Universal ESP Script",
-    LoadingSubtitle = "Loading Enhanced v4...",
+    LoadingSubtitle = "Loading Enhanced v5...",
     DisableRayfieldPrompts = true,
     DisableBuildWarnings = true,
     ConfigurationSaving = {
@@ -36,15 +33,17 @@ local Window = Rayfield:CreateWindow({
 local ESPTab   = Window:CreateTab("ESP Settings", 4483362458)
 local TPTab    = Window:CreateTab("Teleport", 4483362458)
 local CheatTab = Window:CreateTab("Cheats", 4483362458)
+local FPSTab   = Window:CreateTab("FPS Boost", 4483362458)
 local ExtraTab = Window:CreateTab("Extra", 4483362458)
 local InfoTab  = Window:CreateTab("Info", 4483362458)
 
 -- ========== SERVICES ==========
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UIS        = game:GetService("UserInputService")
-local LP         = Players.LocalPlayer
-local Camera     = workspace.CurrentCamera
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UIS            = game:GetService("UserInputService")
+local Lighting       = game:GetService("Lighting")
+local LP             = Players.LocalPlayer
+local Camera         = workspace.CurrentCamera
 
 -- ========== SETTINGS ==========
 local Settings = {
@@ -75,8 +74,78 @@ local CheatSettings = {
     Noclip        = false,
     SpeedEnabled  = false,
     SpeedValue    = 16,
-    SavedPosition = nil,  -- CFrame для сохранённого места
+    SavedPosition = nil,
 }
+
+-- ========== FPS BOOST SETTINGS ==========
+local OriginalGraphics = {
+    QualityLevel         = settings().Rendering.QualityLevel,
+    GlobalShadows        = Lighting.GlobalShadows,
+    FogEnd               = Lighting.FogEnd,
+    Brightness           = Lighting.Brightness,
+    ParticlesEnabled     = true,
+    DecalsEnabled        = true,
+}
+
+local FPSBoostActive = 0  -- 0 = none, 1-4 = level
+
+local function SaveOriginalGraphics()
+    OriginalGraphics.QualityLevel = settings().Rendering.QualityLevel
+    OriginalGraphics.GlobalShadows = Lighting.GlobalShadows
+    OriginalGraphics.FogEnd = Lighting.FogEnd
+    OriginalGraphics.Brightness = Lighting.Brightness
+end
+
+local function SetParticles(state)
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+            obj.Enabled = state
+        end
+    end
+end
+
+local function SetDecals(state)
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Decal") or obj:IsA("Texture") then
+            obj.Transparency = state and 0 or 1
+        end
+    end
+end
+
+local function ApplyFPSBoost(level)
+    FPSBoostActive = level
+    if level == 0 then
+        -- СБРОС
+        pcall(function() settings().Rendering.QualityLevel = OriginalGraphics.QualityLevel end)
+        Lighting.GlobalShadows = OriginalGraphics.GlobalShadows
+        Lighting.FogEnd = OriginalGraphics.FogEnd
+        Lighting.Brightness = OriginalGraphics.Brightness
+        SetParticles(true)
+        SetDecals(true)
+        return
+    end
+
+    if level >= 1 then
+        -- Уровень 1: лёгкий буст (качество -2, убрать туман)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level05 end)
+        Lighting.FogEnd = 100000
+    end
+    if level >= 2 then
+        -- Уровень 2: средний буст (качество минимум, тени выкл)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
+        Lighting.GlobalShadows = false
+    end
+    if level >= 3 then
+        -- Уровень 3: сильный буст (убрать частицы)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        Lighting.Brightness = 1
+        SetParticles(false)
+    end
+    if level >= 4 then
+        -- Уровень 4: максимальный буст (убрать декали, яркость)
+        SetDecals(false)
+    end
+end
 
 -- ========== PALETTE ==========
 local Palette = {
@@ -192,7 +261,6 @@ ESPTab:CreateToggle({
 
 ESPTab:CreateDivider()
 
--- ИСПРАВЛЕННЫЕ ПОЛЗУНКИ: используем правильный синтаксис Rayfield
 ESPTab:CreateSlider({
     Name = "Максимальная дистанция ESP",
     Range = {100, 3000},
@@ -232,14 +300,11 @@ ESPTab:CreateSlider({
 -- ===================================================
 -- ================ TELEPORT TAB =====================
 -- ===================================================
+-- ИСПРАВЛЕНО: убрана лишняя секция заголовка, ники не дублируются
 
-TPTab:CreateSection("Телепорт к игрокам")
-
--- Кнопка обновления списка + кнопки ТП создаются динамически
 local tpButtonsCache = {}
 
 local function RefreshPlayerButtons()
-    -- Удаляем старые кнопки
     for _, btn in pairs(tpButtonsCache) do
         pcall(function() btn:Destroy() end)
     end
@@ -298,7 +363,6 @@ Players.PlayerAdded:Connect(function() RefreshPlayerButtons() end)
 Players.PlayerRemoving:Connect(function() RefreshPlayerButtons() end)
 
 TPTab:CreateDivider()
-TPTab:CreateSection("Сохранение позиции")
 
 TPTab:CreateButton({
     Name = "📍 Сохранить текущее место",
@@ -358,7 +422,6 @@ TPTab:CreateButton({
 
 CheatTab:CreateSection("Движение")
 
--- БЕСКОНЕЧНЫЙ ПРЫЖОК
 CheatTab:CreateToggle({
     Name = "🐇 Бесконечный прыжок",
     CurrentValue = CheatSettings.InfiniteJump,
@@ -373,7 +436,6 @@ CheatTab:CreateToggle({
     end,
 })
 
--- СПИДхак - ВКЛЮЧАТЕЛЬ
 CheatTab:CreateToggle({
     Name = "⚡ СПИДхак (SpeedHack)",
     CurrentValue = CheatSettings.SpeedEnabled,
@@ -393,7 +455,6 @@ CheatTab:CreateToggle({
     end,
 })
 
--- СПИДхак - ПОЛЗУНОК
 CheatTab:CreateSlider({
     Name = "⚡ Скорость (WalkSpeed)",
     Range = {16, 300},
@@ -416,19 +477,23 @@ CheatTab:CreateSlider({
 CheatTab:CreateDivider()
 CheatTab:CreateSection("Коллизии")
 
--- НОУКЛИП
+-- ========== ИСПРАВЛЕННЫЙ НОУКЛИП ==========
+-- Проблема была: HumanoidRootPart исключался из CanCollide=false,
+-- а именно он является основным collider'ом персонажа.
+-- Исправление: отключаем CanCollide у ВСЕХ BasePart включая HRP,
+-- но для этого используем Humanoid StateType чтобы не падал через пол.
+
 CheatTab:CreateToggle({
     Name = "👻 Ноуклип (Noclip)",
     CurrentValue = CheatSettings.Noclip,
     Flag = "Noclip",
     Callback = function(v)
         CheatSettings.Noclip = v
-        -- При отключении — сразу восстановить коллизии
         if not v then
             local char = LP.Character
             if char then
                 for _, part in pairs(char:GetDescendants()) do
-                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    if part:IsA("BasePart") then
                         part.CanCollide = true
                     end
                 end
@@ -453,15 +518,21 @@ UIS.JumpRequest:Connect(function()
     end
 end)
 
--- ========== NOCLIP + SPEED LOOP ==========
+-- ========== ИСПРАВЛЕННЫЙ NOCLIP LOOP ==========
+-- Ключевое исправление: отключаем CanCollide у ВСЕХ BasePart (включая HumanoidRootPart)
 RunService.Stepped:Connect(function()
     if CheatSettings.Noclip then
         local char = LP.Character
         if char then
             for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                if part:IsA("BasePart") then
                     part.CanCollide = false
                 end
+            end
+            -- Дополнительно сбрасываем физическое состояние гуманоида
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
+                hum:ChangeState(Enum.HumanoidStateType.Running)
             end
         end
     end
@@ -473,7 +544,95 @@ LP.CharacterAdded:Connect(function(char)
     if CheatSettings.SpeedEnabled then
         hum.WalkSpeed = CheatSettings.SpeedValue
     end
+    -- Сохраняем оригинальную графику при первом спавне
+    SaveOriginalGraphics()
 end)
+
+-- ===================================================
+-- ================== FPS BOOST TAB ==================
+-- ===================================================
+
+FPSTab:CreateParagraph({
+    Title = "🚀 FPS Бустер",
+    Content = "Выбери уровень буста FPS. Каждый следующий уровень сильнее снижает графику, но даёт больше FPS. Кнопка 'Сброс' вернёт все настройки графики в исходное состояние.",
+})
+
+FPSTab:CreateDivider()
+
+FPSTab:CreateButton({
+    Name = "⚡ Уровень 1 — Лёгкий буст",
+    Callback = function()
+        ApplyFPSBoost(1)
+        Rayfield:Notify({
+            Title = "FPS Буст — Уровень 1",
+            Content = "✅ Лёгкий буст применён: качество -2 ступени, туман отключён",
+            Duration = 3,
+        })
+    end,
+})
+
+FPSTab:CreateButton({
+    Name = "🔥 Уровень 2 — Средний буст",
+    Callback = function()
+        ApplyFPSBoost(2)
+        Rayfield:Notify({
+            Title = "FPS Буст — Уровень 2",
+            Content = "✅ Средний буст: минимальное качество + тени выключены",
+            Duration = 3,
+        })
+    end,
+})
+
+FPSTab:CreateButton({
+    Name = "💀 Уровень 3 — Сильный буст",
+    Callback = function()
+        ApplyFPSBoost(3)
+        Rayfield:Notify({
+            Title = "FPS Буст — Уровень 3",
+            Content = "✅ Сильный буст: минимум графики + частицы/эффекты выключены",
+            Duration = 3,
+        })
+    end,
+})
+
+FPSTab:CreateButton({
+    Name = "☢️ Уровень 4 — МАКСИМАЛЬНЫЙ буст",
+    Callback = function()
+        ApplyFPSBoost(4)
+        Rayfield:Notify({
+            Title = "FPS Буст — Уровень 4",
+            Content = "✅ МАКСИМАЛЬНЫЙ буст: всё выключено, максимум FPS!",
+            Duration = 3,
+        })
+    end,
+})
+
+FPSTab:CreateDivider()
+
+FPSTab:CreateButton({
+    Name = "🔄 Сбросить графику (Restore)",
+    Callback = function()
+        ApplyFPSBoost(0)
+        Rayfield:Notify({
+            Title = "Графика восстановлена",
+            Content = "✅ Все настройки графики возвращены в исходное состояние!",
+            Duration = 3,
+        })
+    end,
+})
+
+FPSTab:CreateParagraph({
+    Title = "📋 Описание уровней",
+    Content = "⚡ Уровень 1: Снижение качества рендера, отключение тумана
+
+🔥 Уровень 2: Мин. качество + отключение глобальных теней
+
+💀 Уровень 3: Всё из Ур.2 + отключение частиц/огня/дыма
+
+☢️ Уровень 4: Всё из Ур.3 + скрытие текстур/декалей
+
+🔄 Сброс: Возврат к исходным настройкам графики",
+})
 
 -- ========== EXTRA TAB (ESP дополнения) ==========
 
@@ -509,8 +668,34 @@ ExtraTab:CreateSlider({
 -- ========== INFO TAB ==========
 
 InfoTab:CreateParagraph({
-    Title = "Universal ESP Script [v4]",
-    Content = "🔧 ИСПРАВЛЕНО:\n• Ползунки ESP теперь работают корректно\n\n🆕 ДОБАВЛЕНО:\n• ТП к игрокам (вкладка Teleport)\n• Сохранение места + возврат\n• Бесконечный прыжок\n• СПИДхак с ползунком\n• Ноуклип\n\n📌 ESP ФУНКЦИИ:\n• Box ESP\n• Chams/Highlight ESP\n• Skeleton ESP\n• Tracers\n• Имя, HP, Дистанция\n• Зелёный = виден, Красный = за стеной\n• Team Check\n\n⌨️ УПРАВЛЕНИЕ:\n• RightShift — открыть/закрыть меню"
+    Title = "Universal ESP Script [v5]",
+    Content = "🔧 ИСПРАВЛЕНО в v5:
+• Ноуклип — теперь работает корректно (HRP тоже получает CanCollide=false)
+• Телепорты — ники игроков больше не дублируются
+
+🆕 ДОБАВЛЕНО в v5:
+• FPS Бустер (4 уровня + сброс графики)
+
+📌 ESP ФУНКЦИИ:
+• Box ESP
+• Chams/Highlight ESP
+• Skeleton ESP
+• Tracers
+• Имя, HP, Дистанция
+• Зелёный = виден, Красный = за стеной
+• Team Check
+
+⚙️ ЧИТЫ:
+• Бесконечный прыжок
+• СПИДхак с ползунком
+• Ноуклип
+
+🚀 FPS БУСТ:
+• 4 уровня снижения графики
+• Кнопка сброса к оригиналу
+
+⌨️ УПРАВЛЕНИЕ:
+• RightShift — открыть/закрыть меню"
 })
 
 -- ===================================================
@@ -901,5 +1086,5 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("✅ Universal ESP v4 loaded | RightShift = menu")
-print("🐇 Бесконечный прыжок | ⚡ SpeedHack | 👻 Noclip | 🌀 TP")
+print("✅ Universal ESP v5 loaded | RightShift = menu")
+print("🐇 Бесконечный прыжок | ⚡ SpeedHack | 👻 Noclip | 🌀 TP | 🚀 FPS Boost")
